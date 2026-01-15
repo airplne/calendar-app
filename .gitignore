@@ -1,0 +1,21 @@
+.codex/
+.claude/
+.agentvibes/
+
+# Secrets / local creds
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs / caches
+*.log
+node_modules/
+dist/
+build/

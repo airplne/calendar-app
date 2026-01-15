@@ -38,7 +38,7 @@ Calendar-app is a model-agnostic, chat-first calendar + task assistant with a Ca
 
 - Docs-only PR; no build/tests expected
 - Verify file presence: `ls _bmad/ _bmad-output/`
-- Verify no sensitive dirs tracked: `git ls-files | grep -E '^\.(codex|claude|agentvibes)/'` should return empty
+- Verify no sensitive dirs tracked: `git ls-files | grep -E '^\\.(codex|claude|agentvibes)/'` should return empty
 
 ## 7. Risks / Follow-ups
 

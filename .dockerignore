@@ -1,0 +1,23 @@
+.git
+.gitignore
+
+# Local artifacts
+**/node_modules
+**/dist
+**/build
+**/*.log
+
+# App data
+data
+
+# Planning artifacts / agent state
+_bmad
+_bmad-output
+.codex
+.claude
+.agentvibes
+
+# Editor/OS
+.DS_Store
+.vscode
+.idea

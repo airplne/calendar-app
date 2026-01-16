@@ -7,21 +7,19 @@
 FROM node:18-alpine AS frontend-build
 
 WORKDIR /app/web
-COPY web/package.json web/pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
-
 COPY web/. .
+RUN corepack enable && if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi
 RUN pnpm run build
 
 # Stage 2: Build Go backend
 FROM golang:1.22-alpine AS backend-build
 
 WORKDIR /app
-COPY server/go.mod server/go.sum ./server/
+COPY server/go.mod ./server/
 RUN cd server && go mod download
 
 COPY server/. ./server/
-COPY --from=frontend-build /app/web/dist ./server/web/dist
+COPY --from=frontend-build /app/web/dist ./server/internal/webui/dist
 
 # Build static binary (CGO disabled for pure Go SQLite driver)
 RUN cd server && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/calendar-app ./cmd/calendarapp

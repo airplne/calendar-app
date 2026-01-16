@@ -2,21 +2,19 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
-	"io"
-	"io/fs"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-)
 
-//go:embed ../../web/dist
-var webDist embed.FS
+	"github.com/airplne/calendar-app/server/internal/caldav"
+	"github.com/airplne/calendar-app/server/internal/webui"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
 
 const (
 	defaultPort    = "8080"
@@ -39,23 +37,28 @@ func main() {
 		"data_dir", dataDir,
 	)
 
-	// Initialize router
-	mux := http.NewServeMux()
+	// Initialize router (Chi per locked MVP decisions)
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
 
 	// Health endpoint
-	mux.HandleFunc("/health", handleHealth)
+	r.Get("/health", handleHealth)
 
 	// SSE endpoint stub
-	mux.HandleFunc("/events", handleSSE)
+	r.Get("/events", handleSSE)
 
-	// Serve embedded web UI (in production) or proxy to Vite (in dev)
-	// For now, serve a simple message until web/dist is built
-	mux.HandleFunc("/", handleRoot)
+	// CalDAV mount point (stubbed handler for now; see internal/caldav)
+	r.Mount("/dav", caldav.NewHandler())
+
+	// Web UI (embedded in production; placeholder when dist not built)
+	r.Mount("/", webui.Handler())
 
 	// Create HTTP server
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      mux,
+		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -122,29 +125,6 @@ func handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-}
-
-func handleRoot(w http.ResponseWriter, r *http.Request) {
-	// Try to serve from embedded dist
-	distFS, err := fs.Sub(webDist, "../../web/dist")
-	if err != nil {
-		// Fallback: serve a simple message
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<!DOCTYPE html>
-<html>
-<head><title>Calendar-app</title></head>
-<body>
-  <h1>Calendar-app Server</h1>
-  <p>Backend is running. Build the frontend with <code>cd web && npm run build</code></p>
-  <p>Health check: <a href="/health">/health</a></p>
-</body>
-</html>`)
-		return
-	}
-
-	// Serve from embedded filesystem
-	fileServer := http.FileServer(http.FS(distFS))
-	fileServer.ServeHTTP(w, r)
 }
 
 func getEnv(key, fallback string) string {

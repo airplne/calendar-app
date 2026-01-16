@@ -19,4 +19,4 @@ sleep 2
 # Start React dev server in foreground
 echo "Starting React dev server..."
 cd web
-npm run dev
+pnpm run dev

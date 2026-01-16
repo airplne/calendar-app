@@ -50,5 +50,10 @@ pnpm-debug.log*
 lerna-debug.log*
 /web/dist/
 
+# Embedded web UI build output (copied from web/dist for Go embed)
+!/server/internal/webui/dist/
+/server/internal/webui/dist/*
+!/server/internal/webui/dist/placeholder.txt
+
 # Coverage
 coverage/

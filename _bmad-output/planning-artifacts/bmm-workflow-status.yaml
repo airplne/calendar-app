@@ -23,10 +23,12 @@ workflow_path: "enterprise-greenfield.yaml"
 
 # User description captured during init
 user_description: |
-  A multi-AI personal assistant with unified access to Fantastical calendar
-  events/openings and Todoist tasks/projects. Users interact with their choice
-  of AI (Grok, Claude, ChatGPT, Gemini) - each having full, real-time context -
-  to prioritize, plan, and time-block based on their actual schedule and commitments.
+  A model-agnostic planning assistant built on a self-hosted CalDAV server
+  (Calendar-app is the calendar source of truth) with deep Todoist integration.
+  Users interact with their choice of AI (Grok, Claude, ChatGPT, Gemini) - each
+  having the right real-time context - to prioritize, plan, and time-block based
+  on their actual schedule and commitments. Fantastical/Apple Calendar/Android
+  CalDAV clients sync directly to Calendar-app via CalDAV.
 
   Key features:
   - Unified context system (context pack) for all AI providers
@@ -36,7 +38,7 @@ user_description: |
 
   Integrations:
   - Todoist API (tasks/projects) - read/write
-  - Fantastical/Flexibits API (events/time blocks) - read/write
+  - CalDAV protocol (Calendar-app server) - read/write via standard CalDAV clients
   - Grok (xAI), Claude (Anthropic), ChatGPT/Codex (OpenAI), Gemini (Google)
 
   Stack candidates: Next.js (web) or Electron + React (desktop)
@@ -69,10 +71,11 @@ workflow_status:
   phase_2_planning:
     - id: "prd"
       name: "Product Requirements Document"
-      status: "required"
+      status: "_bmad-output/planning-artifacts/prd.md"
       agent: "pm"
       command: "/bmad:bmm:workflows:prd"
       output: "Product Requirements Document with FRs and NFRs"
+      completed: "2026-01-16"
 
     - id: "create-ux-design"
       name: "UX Design"

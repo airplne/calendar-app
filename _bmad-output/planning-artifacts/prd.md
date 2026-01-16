@@ -37,6 +37,16 @@ classification:
 **Author:** Daniel
 **Date:** 2026-01-15
 
+## Executive Summary
+
+Calendar-app is an AI planning co-pilot built on a self-hosted CalDAV server that delivers ambient protection over ritual optimization. Target users are meeting-heavy knowledge workers and ADHD/context-switching sufferers who currently juggle Fantastical + Todoist manually.
+
+**Core Innovation:** Constraint-guaranteed AI planning (LLM proposes, deterministic validation prevents invalid plans) + ambient protection (continuous monitoring and adaptation, no ritual planning sessions). Differentiated from cloud competitors (Reclaim, Clockwise, Motion) by self-hosted data sovereignty, CalDAV client compatibility, and model-agnostic LLM harness.
+
+**MVP Scope:** CalDAV server (minimal interoperable subset) + Todoist bidirectional sync + AI daily planning loop + focus block protection + preference capture + conflict resolution. Validates problem-solving (does ambient AI reduce burnout?) and experience (is self-hosted ownership compelling?) hypotheses through dogfooding (Weeks 1-4) and cohort testing (Weeks 5-8).
+
+**Explicitly Deferred:** Full integration API ecosystem, multi-calendar unified view, team features, advanced CalDAV edge cases, predictive intelligence. Architecture designed for future expansion without hard-coded single-user assumptions.
+
 ## Success Criteria
 
 ### User Success
@@ -97,9 +107,11 @@ classification:
 Marcus stares at Monday's calendar - wall-to-wall from 9am to 6pm. His Todoist has 47 tasks, 12 overdue. He used to block "focus time" but it never survived first contact with his team. He's been meaning to write the Q2 strategy doc for two weeks.
 
 **Rising Action:**
-Marcus sets up Calendar-app's CalDAV server (source of truth) and points Fantastical/Apple Calendar/Android CalDAV client(s) at it, then connects Todoist. The AI analyzes his week: "You have 2.3 hours of genuinely available time across 5 days. I found 3 tasks that could fit. The strategy doc needs ~4 hours - should I protect Thursday afternoon by declining or proposing reschedules for 2 lower-priority meetings?"
+Marcus sets up Calendar-app's CalDAV server (source of truth) and points Fantastical/Apple Calendar/Android CalDAV client(s) at it, then connects Todoist. He logs into the web UI and views his unified day agenda - events, focus blocks, and Todoist tasks layered together. He switches to week view to see the bigger picture.
 
-Marcus hesitates, then clicks "Propose reschedules." Calendar-app proposes options and drafts reschedule messages for each meeting. For the one where Marcus is organizer, he confirms and the change applies immediately. For the other, Calendar-app drafts the request for Marcus to send; once the organizer updates the invite, the change syncs via CalDAV and his calendar updates. Thursday 2-6pm is now protected.
+The AI analyzes his week and surfaces an overload warning: "You have 47 tasks but only 2.3 hours of genuinely available time across 5 days. The strategy doc alone needs ~4 hours. Tradeoffs required: defer lower-priority tasks, extend timeline, or protect focus time by rescheduling meetings?"
+
+Marcus reviews the proposed tradeoffs and chooses to protect Thursday afternoon. The AI proposes reschedule options for 2 lower-priority meetings. Calendar-app drafts reschedule messages. For the one where Marcus is organizer, he confirms and the change applies immediately. For the other, Calendar-app drafts the request for Marcus to send; once the organizer updates the invite, the change syncs via CalDAV and his calendar updates. Thursday 2-6pm is now protected.
 
 **Climax:**
 Wednesday at 3pm, his CEO adds an "urgent board prep" meeting for Thursday at 3pm - right in his protected block. Within 30 seconds, Calendar-app notifies him: "Your focus block was interrupted. Options:
@@ -113,6 +125,8 @@ He picks C. The AI proposes the rebalanced plan; Marcus confirms with 1-click an
 
 **Resolution:**
 Thursday evening, Marcus has 60% of the strategy doc done. Not perfect, but progress. He didn't work at 10pm. He tags his CEO as "immovable" in Calendar-app's settings; the system remembers this preference and won't propose rescheduling CEO meetings in future plans.
+
+Later, Marcus accidentally clicks "apply" on a plan that moved his 1:1 with his direct report. He immediately opens the audit log, reviews the recent change, and clicks "Undo last apply." Calendar-app restores the 1:1 to its original time. The system checks for external changes - none detected - rollback succeeds cleanly.
 
 ---
 
@@ -231,7 +245,7 @@ Dana deploys Calendar-app via Docker Compose (or a binary) and configures it via
 
 She configures nginx as a reverse proxy with SSL. Calendar-app provides the CalDAV URL format: `https://calendar.dana.dev/caldav/`
 
-Dana opens Fantastical on her Mac, adds a CalDAV account with her credentials. Events sync. She adds the same account to Apple Calendar on her iPhone and DAVx⁵ on her Android tablet.
+Dana logs into the web UI, generates an app-specific password for her CalDAV clients (separate from her web UI password), and adds the account to Fantastical on her Mac. Events sync. She adds the same CalDAV account to Apple Calendar on her iPhone and DAVx⁵ on her Android tablet using the app-specific password.
 
 **Climax:**
 First sync issue: DAVx⁵ on Android shows duplicate events. Dana checks Calendar-app's logs:
@@ -246,7 +260,11 @@ First sync issue: DAVx⁵ on Android shows duplicate events. Dana checks Calenda
 She picks C. Logs show DAVx⁵ is triggering duplicate writes/requests (a known client quirk). Calendar-app flags it and links to known mitigation/settings guidance for DAVx⁵.
 
 **Resolution:**
-Dana applies the recommended settings fix; duplicates stop. All three clients sync cleanly. She adds the Todoist token and LLM API key to the config now that CalDAV is stable. She sets up a cron job for daily backups of the calendar data directory. Calendar-app is now her source of truth - no vendor lock-in, full data ownership.
+Dana applies the recommended settings fix; duplicates stop. All three clients sync cleanly. She adds the Todoist token and LLM API key to the config now that CalDAV is stable.
+
+Before using AI planning, Dana configures her privacy preferences: she sets LLM data categories to share event titles but exclude attendee names and task details. She previews what would be sent in a sample planning request and confirms it matches her expectations.
+
+She sets up a cron job for daily backups using the export-all-data endpoint, creating timestamped archives of her calendar, tasks, preferences, and logs. She tests credential rotation by generating a new app-specific password and updating her mobile clients. Calendar-app is now her source of truth - no vendor lock-in, full data ownership, complete control.
 
 ---
 
@@ -309,6 +327,11 @@ The team adopts the self-check bot. Tomas plans v2: teammates can opt-in via Cal
 | **Operator Tooling** | Dana (5) | Env/config file deployment; sync logs with client fingerprints; debug bundle export; backup-friendly data directory |
 | **Internal REST API** | Marcus (1), Priya (2), All | Used by Web UI for planning operations, preferences, Todoist sync; not marketed as third-party API |
 | **Public Integration API** | Tomas (6) | Minimal read-only (MVP-lite): self-check focus status; full integration platform (team queries, expanded endpoints, SDKs) deferred to Post-MVP |
+| **Privacy & Data Rights** | Dana (5) | LLM data category configuration, preview before send, export all data, account/data deletion (FR36-39) |
+| **Authentication & Credentials** | Dana (5), All | Web UI login/logout, CalDAV credential management, app-specific passwords, credential rotation (FR51-55) |
+| **Views & Navigation** | Marcus (1), Priya (2) | Unified day agenda, day/week view switching, date navigation (FR56-58) |
+| **Audit Log & Rollback** | Marcus (1) | Plan apply audit log, view log, undo/rollback with conflict handling (FR59-62) |
+| **Overload Management** | Marcus (1) | Capacity detection, overload warnings, tradeoff proposals (FR63-65) |
 
 ## Domain-Specific Requirements
 
@@ -497,6 +520,39 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 - Screen reader compatibility
 - Focus indicators for keyboard users
 
+### API Documentation Strategy
+
+**CalDAV Protocol:**
+- Reference to CalDAV subset for interoperability (conformance for implemented operations)
+- Document supported vs deferred CalDAV operations (CRUD + basic RRULE; sync-collection deferred)
+- RFC 4791/RFC 5545 reference with Calendar-app-specific implementation notes
+
+**Internal REST API:**
+- Self-documenting via generated OpenAPI/Swagger specification from code
+- Inline code comments and type definitions
+- MVP: Basic README with endpoint listing and examples
+
+**Public Integration API (MVP-lite):**
+- Developer reference for read-only endpoints (focus-status query)
+- Authentication guide (API key generation, scoping, rate limits)
+- Example requests/responses for self-check integration
+
+**Post-MVP:** Formal developer portal with interactive API explorer, SDKs, webhooks documentation
+
+### SEO Strategy
+
+**Crawlable Content:**
+- Marketing/landing pages: Server-rendered, crawlable, semantic HTML
+- Public documentation: Indexed for organic discovery
+
+**Authenticated UI:**
+- Calendar grid, plan proposals, settings: Behind authentication, noindex by default
+- No SEO optimization needed for private user interfaces
+
+**MVP Scope:**
+- Server-rendered shell provides SEO foundation for public pages
+- Defer comprehensive SEO (sitemap, structured data, meta optimization) until post-validation if organic discovery proves important
+
 ## Project Scoping & Phased Development
 
 ### MVP Strategy & Philosophy
@@ -601,7 +657,7 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 - **FR4:** Users can create recurring events with basic patterns (daily, weekly)
 - **FR5:** Users can sync their calendar with external CalDAV clients (Fantastical, Apple Calendar, DAVx⁵)
 - **FR6:** The system can detect when calendar events are created/modified/deleted by external CalDAV clients
-- **FR7:** The system can detect sync conflicts when the same event is edited simultaneously from multiple clients
+- **FR7:** The system can detect sync conflicts when the same event is edited from multiple clients within a configurable window (default: 2 minutes)
 - **FR8:** Users can resolve sync conflicts by choosing which version to keep after reviewing a diff
 
 ### Task Management (Todoist Integration)
@@ -636,12 +692,12 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 
 ### User Preferences & Learning
 
-- **FR30:** Users can configure energy pattern preferences (peak mental energy times, post-meeting task types)
+- **FR30:** Users can configure energy pattern preferences (peak mental energy time windows, low-energy time windows, post-meeting task capacity: creative/administrative/light)
 - **FR31:** Users can set minimum focus block durations
-- **FR32:** Users can configure meeting batching preferences
-- **FR33:** The system can store user-defined constraint rules for future plan generation
-- **FR34:** Users can trigger guided preference capture when AI plans repeatedly fail
-- **FR35:** The system can ask targeted questions to discover user work patterns (energy levels, task priorities, time-of-day preferences)
+- **FR32:** Users can configure meeting batching preferences (batch start time, maximum consecutive meeting duration, minimum cooldown period between batches)
+- **FR33:** The system can store user-defined constraint rules for future plan generation (format: time-window constraints, attendee/event immutability tags, task-type time-of-day restrictions)
+- **FR34:** Users can trigger guided preference capture when AI plans repeatedly fail (default threshold: 3+ rejections in a single planning session)
+- **FR35:** The system can ask targeted questions to discover user work patterns (minimum: peak energy timing, minimum focus block duration, post-meeting capacity level, task priority rules)
 
 ### Data Privacy & Security
 
@@ -652,7 +708,7 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 
 ### Operator Administration
 
-- **FR40:** Operators can deploy Calendar-app via Docker Compose or binary with env/config file
+- **FR40:** Operators can deploy Calendar-app via containerized deployment (containers) or binary with env/config file
 - **FR41:** Operators can configure CalDAV server settings (storage path, domain/port, auth method)
 - **FR42:** Operators can view sync logs with client fingerprints for troubleshooting
 - **FR43:** Operators can export debug bundles for issue investigation
@@ -685,14 +741,14 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 
 - **FR59:** The system records an audit log for all plan apply actions (what changed, when, which source/trigger)
 - **FR60:** Users can view the audit log of recent plan changes
-- **FR61:** Users can undo/rollback the last applied plan bundle within a defined time window
-- **FR62:** The system can attempt to restore calendar and Todoist state to pre-apply conditions when rollback is triggered; if conflicts exist due to external changes (e.g., CalDAV client edits after apply), the system surfaces the conflicts and requires user choice to complete rollback
+- **FR61:** Users can undo/rollback the last applied plan bundle within a defined time window (default: 15 minutes, operator-configurable)
+- **FR62:** The system can restore calendar and Todoist state to pre-apply conditions when rollback is triggered (success: no external changes detected; conflict scenario: external changes detected, system surfaces conflicts with diff and requires user choice to complete or abort rollback)
 
 ### Capacity & Overload Management
 
-- **FR63:** The system can detect when planned work exceeds available time (overload condition)
+- **FR63:** The system can detect when planned work exceeds available time (overload condition: total task duration > available calendar time by configurable threshold; default: 20% or 2 hours)
 - **FR64:** The system can surface overload warnings to users before displaying proposed plans
-- **FR65:** The system can propose tradeoffs when overload is detected (defer tasks, reduce scope, extend timeline)
+- **FR65:** The system can propose tradeoffs when overload is detected (options: defer lower-priority tasks, descope task requirements, split tasks across multiple days, extend timeline, explicit overtime acceptance)
 
 ## Non-Functional Requirements
 
@@ -702,7 +758,7 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 - Plan generation: <2 seconds from trigger to display (per success criteria)
 - CalDAV sync operations: <500ms for CRUD operations
 - Web UI interactive elements: <100ms feedback for user actions (drag events, click apply, UI updates)
-- Real-time update propagation: <1 second via WebSocket
+- Real-time update propagation: <1 second via real-time push updates (polling fallback)
 
 **Background Efficiency:**
 - CalDAV polling and Todoist sync operations execute without blocking or slowing the Web UI
@@ -763,7 +819,7 @@ Minimal read-only endpoints for simple external tools; scoped API keys required:
 
 **Future Multi-User Considerations:**
 - Architecture designed for horizontal scaling (multi-tenant SaaS deferred to Phase 3)
-- Database and file storage approach supports future optimization
+- Persistence/storage layer supports future optimization
 - No hard-coded single-user assumptions that would block multi-user expansion
 
 ### Accessibility

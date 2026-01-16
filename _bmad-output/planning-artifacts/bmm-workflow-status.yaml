@@ -1,0 +1,122 @@
+# BMM Workflow Status - Calendar-app
+# Generated: 2026-01-15
+# Track: Enterprise BMad Method (Greenfield)
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2026-01-15"
+project: "Calendar-app"
+project_type: "Multi-AI Personal Assistant Platform"
+selected_track: "enterprise"
+field_type: "greenfield"
+workflow_path: "enterprise-greenfield.yaml"
+
+# User description captured during init
+user_description: |
+  A multi-AI personal assistant with unified access to Fantastical calendar
+  events/openings and Todoist tasks/projects. Users interact with their choice
+  of AI (Grok, Claude, ChatGPT, Gemini) - each having full, real-time context -
+  to prioritize, plan, and time-block based on their actual schedule and commitments.
+
+  Key features:
+  - Unified context system (context pack) for all AI providers
+  - Provider abstraction layer with per-provider adapters
+  - Seamless AI switching in single chat UI
+  - Bidirectional actions (create/update time blocks + tasks)
+
+  Integrations:
+  - Todoist API (tasks/projects) - read/write
+  - Fantastical/Flexibits API (events/time blocks) - read/write
+  - Grok (xAI), Claude (Anthropic), ChatGPT/Codex (OpenAI), Gemini (Google)
+
+  Stack candidates: Next.js (web) or Electron + React (desktop)
+
+workflow_status:
+  # Phase 1: Analysis (Optional - User Selected)
+  phase_1_analysis:
+    - id: "brainstorm-project"
+      name: "Brainstorm"
+      status: "recommended"
+      agent: "analyst"
+      command: "/bmad:core:workflows:brainstorming"
+      note: "Creative exploration and ideation"
+
+    - id: "research"
+      name: "Research"
+      status: "recommended"
+      agent: "analyst"
+      command: "/bmad:bmm:workflows:research"
+      note: "Technical/competitive analysis - API capabilities, rate limits, pricing, existing solutions"
+
+    - id: "product-brief"
+      name: "Product Brief"
+      status: "recommended"
+      agent: "analyst"
+      command: "/bmad:bmm:workflows:create-product-brief"
+      note: "Strategic product planning"
+
+  # Phase 2: Planning
+  phase_2_planning:
+    - id: "prd"
+      name: "Product Requirements Document"
+      status: "required"
+      agent: "pm"
+      command: "/bmad:bmm:workflows:prd"
+      output: "Product Requirements Document with FRs and NFRs"
+
+    - id: "create-ux-design"
+      name: "UX Design"
+      status: "conditional"
+      condition: "if_has_ui"
+      agent: "ux-designer"
+      command: "/bmad:bmm:workflows:create-ux-design"
+      note: "Determined after PRD - user/agent decides if needed"
+
+  # Phase 3: Solutioning
+  phase_3_solutioning:
+    - id: "create-architecture"
+      name: "Architecture"
+      status: "required"
+      agent: "architect"
+      command: "/bmad:bmm:workflows:create-architecture"
+      output: "System architecture document"
+
+    - id: "create-epics-and-stories"
+      name: "Epics & Stories"
+      status: "required"
+      agent: "pm"
+      command: "/bmad:bmm:workflows:create-epics-and-stories"
+      note: "Break down PRD into implementable epics and stories"
+
+    - id: "test-design"
+      name: "Test Design"
+      status: "optional"
+      agent: "tea"
+      command: "/bmad:bmm:workflows:testarch-test-design"
+      output: "System-level testability review"
+
+    - id: "implementation-readiness"
+      name: "Implementation Readiness Check"
+      status: "required"
+      agent: "architect"
+      command: "/bmad:bmm:workflows:check-implementation-readiness"
+      note: "Validates PRD + Architecture + Epics + UX"
+
+  # Phase 4: Implementation
+  phase_4_implementation:
+    - id: "sprint-planning"
+      name: "Sprint Planning"
+      status: "required"
+      agent: "sm"
+      command: "/bmad:bmm:workflows:sprint-planning"
+      note: "Creates sprint plan - subsequent work tracked in sprint-status.yaml"

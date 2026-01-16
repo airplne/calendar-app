@@ -2,6 +2,8 @@
 
 PR: https://github.com/airplne/calendar-app/pull/1
 
+Status: merged to `main` via squash (merge commit `f320e2e`, 2026-01-16); branch `bmad-initial-artifacts` deleted.
+
 ## 1. Context / Goal
 
 Calendar-app is a model-agnostic, chat-first calendar + task assistant with a CalDAV server and Todoist integration. This PR bootstraps the BMAD framework scaffold and captures initial planning artifacts from the brainstorming phase.
@@ -44,4 +46,3 @@ Calendar-app is a model-agnostic, chat-first calendar + task assistant with a Ca
 
 - Large vendor-like addition of BMAD framework files (507 files); do not deep-review individual scaffold files
 - Next PR will complete remaining PRD sections and proceed to architecture/epics
-

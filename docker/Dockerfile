@@ -7,8 +7,9 @@
 FROM node:18-alpine AS frontend-build
 
 WORKDIR /app/web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
 COPY web/. .
-RUN corepack enable && if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi
 RUN pnpm run build
 
 # Stage 2: Build Go backend

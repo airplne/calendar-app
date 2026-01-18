@@ -24,11 +24,17 @@ CREATE TABLE IF NOT EXISTS calendars (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Enforce uniqueness: one calendar per (user_id, name) combination
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendars_user_id_name ON calendars(user_id, name);
+
 -- Events table (iCalendar VEVENT components)
+-- Hybrid storage: full ICS for CalDAV fidelity + extracted metadata for queries
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     calendar_id INTEGER NOT NULL,
     uid TEXT NOT NULL,  -- iCalendar UID (globally unique)
+    ics TEXT NOT NULL,  -- Full VEVENT component (stored as-is for CalDAV roundtrip)
+    -- Extracted metadata for efficient SQL queries:
     summary TEXT,  -- Event title
     description TEXT,
     location TEXT,
@@ -36,7 +42,7 @@ CREATE TABLE IF NOT EXISTS events (
     end_time DATETIME NOT NULL,
     all_day BOOLEAN DEFAULT 0,
     recurrence_rule TEXT,  -- RRULE for recurring events
-    etag TEXT NOT NULL,  -- For conflict detection
+    etag TEXT NOT NULL,  -- SHA-256(ics) for conflict detection
     sequence INTEGER DEFAULT 0,  -- iCalendar SEQUENCE
     status TEXT DEFAULT 'CONFIRMED',  -- TENTATIVE, CONFIRMED, CANCELLED
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

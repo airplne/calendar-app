@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,17 +13,24 @@ import (
 	"time"
 
 	"github.com/airplne/calendar-app/server/internal/caldav"
+	"github.com/airplne/calendar-app/server/internal/data"
+	"github.com/airplne/calendar-app/server/internal/domain"
 	"github.com/airplne/calendar-app/server/internal/webui"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+var migrateOnly = flag.Bool("migrate-only", false, "Run database migrations and exit")
+
 const (
-	defaultPort    = "8080"
-	defaultDataDir = "./data"
+	defaultPort          = "8080"
+	defaultDataDir       = "./data"
+	defaultMigrationsDir = "./migrations"
 )
 
 func main() {
+	flag.Parse()
+
 	// Initialize structured logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -31,11 +40,68 @@ func main() {
 	// Load configuration from environment
 	port := getEnv("CALENDARAPP_PORT", defaultPort)
 	dataDir := getEnv("CALENDARAPP_DATA_DIR", defaultDataDir)
+	migrationsDir := getEnv("CALENDARAPP_MIGRATIONS_DIR", defaultMigrationsDir)
 
 	slog.Info("Starting Calendar-app server",
 		"port", port,
 		"data_dir", dataDir,
+		"migrations_dir", migrationsDir,
 	)
+
+	// Open database
+	db, err := data.OpenDB(dataDir)
+	if err != nil {
+		slog.Error("Failed to open database", "error", err)
+		os.Exit(1)
+	}
+	defer data.CloseDB(db)
+
+	// Run migrations
+	if err := data.RunMigrations(db, migrationsDir); err != nil {
+		slog.Error("Failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	// Handle --migrate-only flag
+	if *migrateOnly {
+		slog.Info("Migrations complete, exiting")
+		return
+	}
+
+	// Initialize repositories
+	userRepo := data.NewSQLiteUserRepo(db)
+	calendarRepo := data.NewSQLiteCalendarRepo(db)
+	eventRepo := data.NewSQLiteEventRepo(db)
+
+	// Load auth config to get configured username
+	authConfig := caldav.LoadAuthConfig()
+
+	// Ensure configured user exists (MVP single-user mode)
+	ctx := context.Background()
+	user, err := userRepo.GetByUsername(ctx, authConfig.Username)
+	if errors.Is(err, domain.ErrNotFound) {
+		user, err = userRepo.Create(ctx, authConfig.Username)
+		if err != nil {
+			slog.Error("Failed to create default user", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("Created default user", "username", authConfig.Username)
+	}
+
+	// Ensure default calendar exists for user
+	_, err = calendarRepo.GetByName(ctx, user.ID, "default")
+	if errors.Is(err, domain.ErrNotFound) {
+		defaultCal := &domain.Calendar{
+			UserID:      user.ID,
+			Name:        "default",
+			DisplayName: "Calendar",
+		}
+		if err := calendarRepo.Create(ctx, defaultCal); err != nil {
+			slog.Error("Failed to create default calendar", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("Created default calendar for user", "username", authConfig.Username)
+	}
 
 	// Initialize router (Chi per locked MVP decisions)
 	r := chi.NewRouter()
@@ -49,8 +115,11 @@ func main() {
 	// SSE endpoint stub
 	r.Get("/events", handleSSE)
 
-	// CalDAV mount point (stubbed handler for now; see internal/caldav)
-	r.Mount("/dav", caldav.NewHandler())
+	// Well-known CalDAV auto-discovery endpoint
+	r.Get("/.well-known/caldav", caldav.NewWellKnownRoutes(authConfig.Username).ServeHTTP)
+
+	// CalDAV mount point with repository access
+	r.Mount("/dav", caldav.NewHandlerWithRepos(userRepo, calendarRepo, eventRepo))
 
 	// Web UI (embedded in production; placeholder when dist not built)
 	r.Mount("/", webui.Handler())

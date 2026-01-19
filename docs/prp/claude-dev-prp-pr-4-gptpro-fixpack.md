@@ -211,7 +211,7 @@ Thank you for the detailed review. After investigating the FAIL findings, we've 
 
 > **Please review PR #4 (branch `phase-ab-caldav`)** — the cited commit `a458497` is on `main` and only contains the PRP, not the Phase A+B implementation.
 >
-> **Note:** PR head may advance with docs-only commits. To review the Phase A+B implementation, use `gh pr checkout 4` or view the "Files changed" tab on GitHub. The core CalDAV CRUD implementation is introduced in commit `927a19a`.
+> **Note:** PR head may advance with docs-only commits. To review the Phase A+B implementation, use `gh pr checkout 4` or view the "Files changed" tab on GitHub. The core CalDAV CRUD implementation is introduced in commit 927a19a.
 
 ### Evidence
 
@@ -574,7 +574,7 @@ Thank you for the thorough review that prompted these quality improvements!
 | Branch | Commit | Content |
 |--------|--------|---------|
 | `main` | `a458497` | PRP only, no Phase A+B code |
-| `phase-ab-caldav` (head) | `a5ccc6a` | Latest docs-only commit |
+| `phase-ab-caldav` (PR head) | `HEAD` | PR head may advance; review via `gh pr checkout 4` |
 | `phase-ab-caldav` (impl) | `927a19a` | Full Phase A+B implementation |
 
 ### GPT Pro Original Findings

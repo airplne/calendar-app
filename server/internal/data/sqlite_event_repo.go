@@ -14,11 +14,34 @@ import (
 // SQLiteEventRepo implements domain.EventRepo using SQLite
 type SQLiteEventRepo struct {
 	db *sql.DB
+	tx *sql.Tx // optional transaction; when set, used instead of db
 }
 
 // NewSQLiteEventRepo creates a new SQLite event repository
 func NewSQLiteEventRepo(db *sql.DB) *SQLiteEventRepo {
 	return &SQLiteEventRepo{db: db}
+}
+
+// WithTx returns a new SQLiteEventRepo that operates within the given transaction.
+// The returned instance shares the same db reference but uses tx for all operations.
+func (r *SQLiteEventRepo) WithTx(tx *sql.Tx) *SQLiteEventRepo {
+	return &SQLiteEventRepo{
+		db: r.db,
+		tx: tx,
+	}
+}
+
+// execer returns either the transaction or the database for executing queries.
+// This allows the same methods to work with or without an active transaction.
+func (r *SQLiteEventRepo) execer() interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+} {
+	if r.tx != nil {
+		return r.tx
+	}
+	return r.db
 }
 
 // Create inserts a new event into the database
@@ -37,7 +60,7 @@ func (r *SQLiteEventRepo) Create(ctx context.Context, event *domain.Event) error
 	`
 
 	now := time.Now()
-	result, err := r.db.ExecContext(ctx, query,
+	result, err := r.execer().ExecContext(ctx, query,
 		event.CalendarID,
 		event.UID,
 		event.ICS,
@@ -84,7 +107,7 @@ func (r *SQLiteEventRepo) GetByUID(ctx context.Context, calendarID int64, uid st
 		WHERE calendar_id = ? AND uid = ?
 	`
 
-	row := r.db.QueryRowContext(ctx, query, calendarID, uid)
+	row := r.execer().QueryRowContext(ctx, query, calendarID, uid)
 	event, err := scanEvent(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -106,7 +129,7 @@ func (r *SQLiteEventRepo) GetByID(ctx context.Context, id int64) (*domain.Event,
 		WHERE id = ?
 	`
 
-	row := r.db.QueryRowContext(ctx, query, id)
+	row := r.execer().QueryRowContext(ctx, query, id)
 	event, err := scanEvent(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -130,7 +153,7 @@ func (r *SQLiteEventRepo) List(ctx context.Context, calendarID int64, start, end
 		ORDER BY start_time ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, calendarID, end, start)
+	rows, err := r.execer().QueryContext(ctx, query, calendarID, end, start)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list events: %w", err)
 	}
@@ -163,7 +186,7 @@ func (r *SQLiteEventRepo) ListAll(ctx context.Context, calendarID int64) ([]*dom
 		ORDER BY start_time ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, calendarID)
+	rows, err := r.execer().QueryContext(ctx, query, calendarID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list all events: %w", err)
 	}
@@ -193,84 +216,93 @@ func (r *SQLiteEventRepo) Update(ctx context.Context, event *domain.Event, expec
 		return fmt.Errorf("invalid event: %w", err)
 	}
 
+	// If we're already in a transaction (r.tx is set), use it directly.
+	// Otherwise, create our own transaction for atomic ETag check + update.
+	if r.tx != nil {
+		return r.updateInTx(ctx, r.tx, event, expectedETag)
+	}
+
 	// Use transaction to ensure ETag check and update are atomic
-	err := WithTx(ctx, r.db, func(tx *sql.Tx) error {
-		// First, check the current ETag
-		var currentETag string
-		err := tx.QueryRowContext(ctx,
-			"SELECT etag FROM events WHERE calendar_id = ? AND uid = ?",
-			event.CalendarID, event.UID,
-		).Scan(&currentETag)
+	return WithTx(ctx, r.db, func(tx *sql.Tx) error {
+		return r.updateInTx(ctx, tx, event, expectedETag)
+	})
+}
 
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.ErrNotFound
-			}
-			return fmt.Errorf("failed to check ETag: %w", err)
-		}
+// updateInTx performs the actual update within a transaction
+func (r *SQLiteEventRepo) updateInTx(ctx context.Context, tx *sql.Tx, event *domain.Event, expectedETag string) error {
+	// First, check the current ETag
+	var currentETag string
+	err := tx.QueryRowContext(ctx,
+		"SELECT etag FROM events WHERE calendar_id = ? AND uid = ?",
+		event.CalendarID, event.UID,
+	).Scan(&currentETag)
 
-		// Verify ETag matches
-		if currentETag != expectedETag {
-			slog.Debug("ETag mismatch",
-				"expected", expectedETag,
-				"current", currentETag,
-				"calendar_id", event.CalendarID,
-				"uid", event.UID,
-			)
-			return domain.ErrPreconditionFailed
-		}
-
-		// ETag matches, proceed with update
-		query := `
-			UPDATE events
-			SET ics = ?, summary = ?, description = ?, location = ?,
-				start_time = ?, end_time = ?, all_day = ?, recurrence_rule = ?,
-				etag = ?, sequence = ?, status = ?, updated_at = ?
-			WHERE calendar_id = ? AND uid = ?
-		`
-
-		now := time.Now()
-		result, err := tx.ExecContext(ctx, query,
-			event.ICS,
-			event.Summary,
-			nullString(event.Description),
-			nullString(event.Location),
-			event.StartTime,
-			event.EndTime,
-			event.AllDay,
-			nullString(event.RecurrenceRule),
-			event.ETag,
-			event.Sequence,
-			event.Status,
-			now,
-			event.CalendarID,
-			event.UID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update event: %w", err)
-		}
-
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		}
-
-		if rowsAffected == 0 {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
+		return fmt.Errorf("failed to check ETag: %w", err)
+	}
 
-		event.UpdatedAt = now
-		return nil
-	})
+	// Verify ETag matches
+	if currentETag != expectedETag {
+		slog.Debug("ETag mismatch",
+			"expected", expectedETag,
+			"current", currentETag,
+			"calendar_id", event.CalendarID,
+			"uid", event.UID,
+		)
+		return domain.ErrPreconditionFailed
+	}
 
-	return err
+	// ETag matches, proceed with update
+	query := `
+		UPDATE events
+		SET ics = ?, summary = ?, description = ?, location = ?,
+			start_time = ?, end_time = ?, all_day = ?, recurrence_rule = ?,
+			etag = ?, sequence = ?, status = ?, updated_at = ?
+		WHERE calendar_id = ? AND uid = ?
+	`
+
+	now := time.Now()
+	result, err := tx.ExecContext(ctx, query,
+		event.ICS,
+		event.Summary,
+		nullString(event.Description),
+		nullString(event.Location),
+		event.StartTime,
+		event.EndTime,
+		event.AllDay,
+		nullString(event.RecurrenceRule),
+		event.ETag,
+		event.Sequence,
+		event.Status,
+		now,
+		event.CalendarID,
+		event.UID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update event: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+
+	event.UpdatedAt = now
+	return nil
 }
 
 // Delete removes an event from the database
 func (r *SQLiteEventRepo) Delete(ctx context.Context, calendarID int64, uid string) error {
 	query := `DELETE FROM events WHERE calendar_id = ? AND uid = ?`
 
-	result, err := r.db.ExecContext(ctx, query, calendarID, uid)
+	result, err := r.execer().ExecContext(ctx, query, calendarID, uid)
 	if err != nil {
 		return fmt.Errorf("failed to delete event: %w", err)
 	}

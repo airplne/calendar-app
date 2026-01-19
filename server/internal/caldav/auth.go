@@ -14,11 +14,25 @@ type AuthConfig struct {
 	Password string
 }
 
-// LoadAuthConfig loads auth configuration from environment
+// LoadAuthConfig loads auth configuration from environment.
+// In production mode (CALENDARAPP_ENV=production), explicit credentials are required.
 func LoadAuthConfig() AuthConfig {
+	env := os.Getenv("CALENDARAPP_ENV")
 	username := os.Getenv("CALENDARAPP_USER")
 	password := os.Getenv("CALENDARAPP_PASS")
 
+	isProduction := env == "production"
+
+	// In production mode, require explicit credentials
+	if isProduction {
+		if username == "" || password == "" {
+			slog.Error("Production mode requires explicit credentials",
+				"hint", "Set CALENDARAPP_USER and CALENDARAPP_PASS environment variables")
+			os.Exit(1)
+		}
+	}
+
+	// In non-production mode, allow defaults with warnings
 	if username == "" {
 		username = "testuser"
 		slog.Warn("Using default username - set CALENDARAPP_USER in production")

@@ -13,11 +13,34 @@ import (
 // SQLiteCalendarRepo implements domain.CalendarRepo using SQLite
 type SQLiteCalendarRepo struct {
 	db *sql.DB
+	tx *sql.Tx // optional transaction; when set, used instead of db
 }
 
 // NewSQLiteCalendarRepo creates a new SQLite calendar repository
 func NewSQLiteCalendarRepo(db *sql.DB) *SQLiteCalendarRepo {
 	return &SQLiteCalendarRepo{db: db}
+}
+
+// WithTx returns a new SQLiteCalendarRepo that operates within the given transaction.
+// The returned instance shares the same db reference but uses tx for all operations.
+func (r *SQLiteCalendarRepo) WithTx(tx *sql.Tx) *SQLiteCalendarRepo {
+	return &SQLiteCalendarRepo{
+		db: r.db,
+		tx: tx,
+	}
+}
+
+// execer returns either the transaction or the database for executing queries.
+// This allows the same methods to work with or without an active transaction.
+func (r *SQLiteCalendarRepo) execer() interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+} {
+	if r.tx != nil {
+		return r.tx
+	}
+	return r.db
 }
 
 func (r *SQLiteCalendarRepo) Create(ctx context.Context, calendar *domain.Calendar) error {
@@ -176,7 +199,7 @@ func (r *SQLiteCalendarRepo) Delete(ctx context.Context, id int64) error {
 func (r *SQLiteCalendarRepo) IncrementSyncToken(ctx context.Context, calendarID int64) (string, error) {
 	newToken := fmt.Sprintf("v%d", time.Now().UnixNano())
 
-	result, err := r.db.ExecContext(ctx,
+	result, err := r.execer().ExecContext(ctx,
 		"UPDATE calendars SET sync_token = ?, updated_at = ? WHERE id = ?",
 		newToken, time.Now(), calendarID,
 	)

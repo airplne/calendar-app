@@ -459,3 +459,161 @@ func TestSQLiteEventRepo_Create_ValidationError(t *testing.T) {
 		t.Error("Expected validation error, got nil")
 	}
 }
+
+// TestSQLiteEventRepo_WithTx_Rollback proves that when a transaction is rolled back,
+// both event creation and sync token bump are undone atomically.
+func TestSQLiteEventRepo_WithTx_Rollback(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	userID := createTestUser(t, db)
+	cal := createTestCalendar(t, db, userID)
+	eventRepo := NewSQLiteEventRepo(db)
+	calendarRepo := NewSQLiteCalendarRepo(db)
+	ctx := context.Background()
+
+	// Get initial sync token
+	calBefore, err := calendarRepo.GetByID(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("Failed to get calendar: %v", err)
+	}
+	initialSyncToken := calBefore.SyncToken
+
+	// Begin transaction
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	// Create repo instances bound to transaction
+	eventRepoTx := eventRepo.WithTx(tx)
+	calendarRepoTx := calendarRepo.WithTx(tx)
+
+	// Create event within transaction
+	event := &domain.Event{
+		CalendarID: cal.ID,
+		UID:        "rollback-test",
+		ICS:        "BEGIN:VEVENT\nUID:rollback-test\nEND:VEVENT",
+		Summary:    "Rollback Test",
+		StartTime:  time.Now(),
+		EndTime:    time.Now().Add(time.Hour),
+		ETag:       domain.GenerateETag([]byte("test")),
+		Status:     "CONFIRMED",
+	}
+
+	if err := eventRepoTx.Create(ctx, event); err != nil {
+		t.Fatalf("Create in tx failed: %v", err)
+	}
+
+	// Bump sync token within same transaction
+	newToken, err := calendarRepoTx.IncrementSyncToken(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("IncrementSyncToken in tx failed: %v", err)
+	}
+	t.Logf("New sync token in tx: %s", newToken)
+
+	// Simulate failure by rolling back
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback failed: %v", err)
+	}
+
+	// Verify event was NOT persisted (rolled back)
+	_, err = eventRepo.GetByUID(ctx, cal.ID, "rollback-test")
+	if err != domain.ErrNotFound {
+		t.Error("Event should NOT exist after rollback (transaction atomicity violated)")
+	}
+
+	// Verify sync token was NOT changed (rolled back)
+	calAfter, err := calendarRepo.GetByID(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("Failed to get calendar after rollback: %v", err)
+	}
+	if calAfter.SyncToken != initialSyncToken {
+		t.Errorf("Sync token should NOT have changed after rollback: got %s, want %s",
+			calAfter.SyncToken, initialSyncToken)
+	}
+
+	t.Log("Transaction atomicity verified: both event and sync token rolled back together")
+}
+
+// TestSQLiteEventRepo_WithTx_Commit proves that when a transaction is committed,
+// both event creation and sync token bump persist atomically.
+func TestSQLiteEventRepo_WithTx_Commit(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	userID := createTestUser(t, db)
+	cal := createTestCalendar(t, db, userID)
+	eventRepo := NewSQLiteEventRepo(db)
+	calendarRepo := NewSQLiteCalendarRepo(db)
+	ctx := context.Background()
+
+	// Get initial sync token
+	calBefore, err := calendarRepo.GetByID(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("Failed to get calendar: %v", err)
+	}
+	initialSyncToken := calBefore.SyncToken
+
+	// Begin transaction
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback() // no-op if committed
+
+	// Create repo instances bound to transaction
+	eventRepoTx := eventRepo.WithTx(tx)
+	calendarRepoTx := calendarRepo.WithTx(tx)
+
+	// Create event within transaction
+	event := &domain.Event{
+		CalendarID: cal.ID,
+		UID:        "commit-test",
+		ICS:        "BEGIN:VEVENT\nUID:commit-test\nEND:VEVENT",
+		Summary:    "Commit Test",
+		StartTime:  time.Now(),
+		EndTime:    time.Now().Add(time.Hour),
+		ETag:       domain.GenerateETag([]byte("test")),
+		Status:     "CONFIRMED",
+	}
+
+	if err := eventRepoTx.Create(ctx, event); err != nil {
+		t.Fatalf("Create in tx failed: %v", err)
+	}
+
+	// Bump sync token within same transaction
+	newToken, err := calendarRepoTx.IncrementSyncToken(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("IncrementSyncToken in tx failed: %v", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify event WAS persisted (committed)
+	gotEvent, err := eventRepo.GetByUID(ctx, cal.ID, "commit-test")
+	if err != nil {
+		t.Errorf("Event should exist after commit: %v", err)
+	}
+	if gotEvent.Summary != "Commit Test" {
+		t.Errorf("Event summary mismatch: got %s", gotEvent.Summary)
+	}
+
+	// Verify sync token WAS changed (committed)
+	calAfter, err := calendarRepo.GetByID(ctx, cal.ID)
+	if err != nil {
+		t.Fatalf("Failed to get calendar after commit: %v", err)
+	}
+	if calAfter.SyncToken == initialSyncToken {
+		t.Error("Sync token should have changed after commit")
+	}
+	if calAfter.SyncToken != newToken {
+		t.Errorf("Sync token mismatch: got %s, want %s", calAfter.SyncToken, newToken)
+	}
+
+	t.Logf("Transaction atomicity verified: both event and sync token committed together (%s -> %s)",
+		initialSyncToken, newToken)
+}

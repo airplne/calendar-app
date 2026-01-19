@@ -3,6 +3,7 @@ package caldav
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -13,22 +14,27 @@ import (
 	"github.com/emersion/go-webdav"
 	"github.com/emersion/go-webdav/caldav"
 
+	"github.com/airplne/calendar-app/server/internal/data"
 	"github.com/airplne/calendar-app/server/internal/domain"
 )
 
 // Backend implements caldav.Backend using our domain repositories
 type Backend struct {
+	db           *sql.DB
 	userRepo     domain.UserRepo
-	calendarRepo domain.CalendarRepo
-	eventRepo    domain.EventRepo
+	calendarRepo *data.SQLiteCalendarRepo
+	eventRepo    *data.SQLiteEventRepo
 
 	// Current authenticated user (set by auth middleware via context)
 	// For MVP single-user, we'll use a fixed user
 }
 
 // NewBackend creates a new CalDAV backend
-func NewBackend(userRepo domain.UserRepo, calendarRepo domain.CalendarRepo, eventRepo domain.EventRepo) *Backend {
+// The db parameter is required for transaction support (atomic event write + sync token bump).
+// The calendarRepo and eventRepo must be concrete SQLite repos to support WithTx.
+func NewBackend(db *sql.DB, userRepo domain.UserRepo, calendarRepo *data.SQLiteCalendarRepo, eventRepo *data.SQLiteEventRepo) *Backend {
 	return &Backend{
+		db:           db,
 		userRepo:     userRepo,
 		calendarRepo: calendarRepo,
 		eventRepo:    eventRepo,
@@ -122,6 +128,7 @@ func (b *Backend) CreateCalendar(ctx context.Context, calendar *caldav.Calendar)
 		return fmt.Errorf("failed to create calendar: %w", err)
 	}
 
+	slog.Info("caldav.calendar.created", "username", user.Username, "calendar", calName)
 	return nil
 }
 
@@ -214,6 +221,7 @@ func (b *Backend) QueryCalendarObjects(ctx context.Context, urlPath string, quer
 
 // PutCalendarObject creates or updates an event
 // This is the CRITICAL method for CalDAV sync with ETag conflict detection
+// Event write and sync token bump are atomic (single transaction).
 func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalData *ical.Calendar, opts *caldav.PutCalendarObjectOptions) (*caldav.CalendarObject, error) {
 	user := getUserFromContext(ctx)
 	if user == nil {
@@ -274,15 +282,30 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalDat
 			Status:         "CONFIRMED",
 		}
 
-		if err := b.eventRepo.Create(ctx, event); err != nil {
+		// Begin transaction for atomic event create + sync token bump
+		tx, err := b.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer tx.Rollback() // no-op if committed
+
+		eventRepoTx := b.eventRepo.WithTx(tx)
+		calendarRepoTx := b.calendarRepo.WithTx(tx)
+
+		if err := eventRepoTx.Create(ctx, event); err != nil {
 			return nil, fmt.Errorf("failed to create event: %w", err)
 		}
 
-		// Increment calendar sync token
-		if _, err := b.calendarRepo.IncrementSyncToken(ctx, cal.ID); err != nil {
-			slog.Warn("failed to increment sync token", "error", err)
+		// Increment calendar sync token (in same transaction)
+		if _, err := calendarRepoTx.IncrementSyncToken(ctx, cal.ID); err != nil {
+			return nil, fmt.Errorf("failed to increment sync token: %w", err)
 		}
 
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		slog.Info("caldav.event.created", "username", user.Username, "calendar", calName, "uid", uid, "etag", etag)
 		return b.domainEventToCalDAV(event, urlPath), nil
 	}
 
@@ -295,11 +318,7 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalDat
 		if !opts.IfMatch.IsWildcard() {
 			clientETag := string(opts.IfMatch)
 			if clientETag != oldETag {
-				slog.Debug("ETag mismatch on PUT",
-					"client_etag", clientETag,
-					"server_etag", oldETag,
-					"uid", uid,
-				)
+				slog.Debug("caldav.conflict", "expected_etag", clientETag, "actual_etag", oldETag, "status", 412)
 				return nil, webdav.NewHTTPError(412, fmt.Errorf("ETag mismatch"))
 			}
 		}
@@ -314,22 +333,39 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalDat
 	existing.ETag = etag
 	existing.Sequence = sequence
 
-	if err := b.eventRepo.Update(ctx, existing, oldETag); err != nil {
+	// Begin transaction for atomic event update + sync token bump
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op if committed
+
+	eventRepoTx := b.eventRepo.WithTx(tx)
+	calendarRepoTx := b.calendarRepo.WithTx(tx)
+
+	if err := eventRepoTx.Update(ctx, existing, oldETag); err != nil {
 		if err == domain.ErrPreconditionFailed {
+			slog.Debug("caldav.conflict", "expected_etag", oldETag, "actual_etag", "changed", "status", 412)
 			return nil, webdav.NewHTTPError(412, fmt.Errorf("concurrent modification"))
 		}
 		return nil, fmt.Errorf("failed to update event: %w", err)
 	}
 
-	// Increment calendar sync token
-	if _, err := b.calendarRepo.IncrementSyncToken(ctx, cal.ID); err != nil {
-		slog.Warn("failed to increment sync token", "error", err)
+	// Increment calendar sync token (in same transaction)
+	if _, err := calendarRepoTx.IncrementSyncToken(ctx, cal.ID); err != nil {
+		return nil, fmt.Errorf("failed to increment sync token: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	slog.Info("caldav.event.updated", "username", user.Username, "calendar", calName, "uid", uid, "etag", etag)
 	return b.domainEventToCalDAV(existing, urlPath), nil
 }
 
 // DeleteCalendarObject removes an event
+// Event deletion and sync token bump are atomic (single transaction).
 func (b *Backend) DeleteCalendarObject(ctx context.Context, urlPath string) error {
 	user := getUserFromContext(ctx)
 	if user == nil {
@@ -342,18 +378,33 @@ func (b *Backend) DeleteCalendarObject(ctx context.Context, urlPath string) erro
 		return webdav.NewHTTPError(404, fmt.Errorf("calendar not found"))
 	}
 
-	if err := b.eventRepo.Delete(ctx, cal.ID, uid); err != nil {
+	// Begin transaction for atomic event delete + sync token bump
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op if committed
+
+	eventRepoTx := b.eventRepo.WithTx(tx)
+	calendarRepoTx := b.calendarRepo.WithTx(tx)
+
+	if err := eventRepoTx.Delete(ctx, cal.ID, uid); err != nil {
 		if err == domain.ErrNotFound {
 			return webdav.NewHTTPError(404, fmt.Errorf("event not found"))
 		}
 		return fmt.Errorf("failed to delete event: %w", err)
 	}
 
-	// Increment calendar sync token
-	if _, err := b.calendarRepo.IncrementSyncToken(ctx, cal.ID); err != nil {
-		slog.Warn("failed to increment sync token", "error", err)
+	// Increment calendar sync token (in same transaction)
+	if _, err := calendarRepoTx.IncrementSyncToken(ctx, cal.ID); err != nil {
+		return fmt.Errorf("failed to increment sync token: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	slog.Info("caldav.event.deleted", "username", user.Username, "calendar", calName, "uid", uid)
 	return nil
 }
 

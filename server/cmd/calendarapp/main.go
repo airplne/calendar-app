@@ -41,11 +41,24 @@ func main() {
 	port := getEnv("CALENDARAPP_PORT", defaultPort)
 	dataDir := getEnv("CALENDARAPP_DATA_DIR", defaultDataDir)
 	migrationsDir := getEnv("CALENDARAPP_MIGRATIONS_DIR", defaultMigrationsDir)
+	appEnv := getEnv("CALENDARAPP_ENV", "development")
+
+	// Production mode security check: require explicit credentials
+	if appEnv == "production" {
+		if os.Getenv("CALENDARAPP_USER") == "" || os.Getenv("CALENDARAPP_PASS") == "" {
+			slog.Error("SECURITY ERROR: Production mode requires explicit credentials",
+				"hint", "Set CALENDARAPP_USER and CALENDARAPP_PASS environment variables",
+				"CALENDARAPP_ENV", appEnv,
+			)
+			os.Exit(1)
+		}
+	}
 
 	slog.Info("Starting Calendar-app server",
 		"port", port,
 		"data_dir", dataDir,
 		"migrations_dir", migrationsDir,
+		"env", appEnv,
 	)
 
 	// Open database
@@ -119,7 +132,7 @@ func main() {
 	r.Get("/.well-known/caldav", caldav.NewWellKnownRoutes(authConfig.Username).ServeHTTP)
 
 	// CalDAV mount point with repository access
-	r.Mount("/dav", caldav.NewHandlerWithRepos(userRepo, calendarRepo, eventRepo))
+	r.Mount("/dav", caldav.NewHandlerWithRepos(db, userRepo, calendarRepo, eventRepo))
 
 	// Web UI (embedded in production; placeholder when dist not built)
 	r.Mount("/", webui.Handler())

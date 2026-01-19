@@ -260,7 +260,7 @@ Could you please re-run the review by:
 2. Running `cd server && go test ./... && go vet ./...` if possible
 3. Updating the verdict based on the actual PR content
 
-The RFC 5545 WARN and "data loss risk" concerns are valid quality suggestions — we're adding roundtrip fidelity tests to address them (see commits on this PR).
+The RFC 5545 WARN and "data loss risk" concerns are valid quality suggestions. If you still want extra hardening after re-review, we can add roundtrip fidelity tests for ATTENDEE/VALARM/X-* in a follow-up PR.
 
 Thank you!
 ```
@@ -277,7 +277,7 @@ This PR implements the following schema guarantees per the architecture doc:
 | Requirement | Implementation | Location |
 |-------------|----------------|----------|
 | Full ICS storage | `events.ics TEXT NOT NULL` | `migrations/00001_init.sql:36` |
-| ETag derivation | SHA-256 of persisted ICS bytes | `data/sqlite_event_repo.go:GenerateETag` |
+| ETag derivation | SHA-256 of persisted ICS bytes | `server/internal/domain/event.go:GenerateETag` |
 | Calendar uniqueness | `UNIQUE INDEX (user_id, name)` | `migrations/00001_init.sql:28` |
 | Conflict detection | 412 Precondition Failed on ETag mismatch | `caldav/backend.go:Put` |
 ```

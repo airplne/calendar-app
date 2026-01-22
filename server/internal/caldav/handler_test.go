@@ -475,3 +475,56 @@ func TestCalDAV_TransactionAtomicity_DELETE(t *testing.T) {
 	t.Logf("Transaction atomicity verified: event deleted and sync token bumped from %q to %q",
 		preDeletionSyncToken, cal.SyncToken)
 }
+
+// TestCalDAV_GET_CorruptStoredICS_Returns500 verifies that a GET request for an event
+// with corrupt/unparseable ICS data in the database returns HTTP 500, not 200 with empty data.
+// This is a regression test for the "empty calendar on parse error" behavior that was masking
+// data corruption issues.
+func TestCalDAV_GET_CorruptStoredICS_Returns500(t *testing.T) {
+	srv, _, calRepo, eventRepo := setupTestServer(t)
+	ctx := context.Background()
+
+	// Get user's calendar
+	cal, err := calRepo.GetByName(ctx, 1, "default")
+	if err != nil {
+		t.Fatalf("Failed to get calendar: %v", err)
+	}
+
+	// Create event directly in DB with INTENTIONALLY INVALID ICS
+	// This ICS is corrupt: VEVENT without VCALENDAR wrapper
+	corruptICS := "BEGIN:VEVENT\nUID:corrupt-test-event\nDTSTAMP:20260116T080000Z\nSUMMARY:Corrupt Test\nDTSTART:20260116T090000Z\nDTEND:20260116T100000Z\nEND:VEVENT"
+
+	event := &domain.Event{
+		CalendarID: cal.ID,
+		UID:        "corrupt-test-event",
+		ICS:        corruptICS, // Intentionally corrupt - no VCALENDAR wrapper
+		Summary:    "Corrupt Test",
+		StartTime:  time.Now(),
+		EndTime:    time.Now().Add(time.Hour),
+		ETag:       domain.GenerateETag([]byte(corruptICS)),
+		Status:     "CONFIRMED",
+	}
+	if err := eventRepo.Create(ctx, event); err != nil {
+		t.Fatalf("Failed to create event with corrupt ICS: %v", err)
+	}
+
+	// Attempt to GET the corrupt event
+	req, _ := http.NewRequest("GET", srv.URL+caldavBase+"/calendars/testuser/default/corrupt-test-event.ics", nil)
+	req.SetBasicAuth("testuser", "testpass")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// MUST return 500 Internal Server Error, NOT 200 OK
+	// The old behavior returned 200 with an empty calendar, masking corruption
+	if resp.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("Expected 500 Internal Server Error for corrupt ICS, got %d. Body: %s",
+			resp.StatusCode, string(body))
+	}
+
+	t.Logf("Regression test passed: corrupt ICS correctly returns HTTP 500 instead of empty calendar")
+}

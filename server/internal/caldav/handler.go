@@ -110,24 +110,37 @@ func ICSContentTypeMiddleware(next http.Handler) http.Handler {
 // icsResponseWriter wraps http.ResponseWriter to ensure Content-Type is set for .ics responses
 type icsResponseWriter struct {
 	http.ResponseWriter
-	headerSet bool
+	headerSet  bool
+	statusCode int
 }
 
 func (w *icsResponseWriter) WriteHeader(code int) {
-	w.ensureContentType()
+	w.statusCode = code
+	w.ensureContentType(code)
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *icsResponseWriter) Write(data []byte) (int, error) {
-	w.ensureContentType()
+	// If WriteHeader wasn't called, default status is 200
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	w.ensureContentType(w.statusCode)
 	return w.ResponseWriter.Write(data)
 }
 
-func (w *icsResponseWriter) ensureContentType() {
+func (w *icsResponseWriter) ensureContentType(statusCode int) {
 	if w.headerSet {
 		return
 	}
 	w.headerSet = true
+
+	// Only force text/calendar Content-Type for successful (2xx) responses
+	// Error responses (4xx, 5xx) should not be labeled as text/calendar
+	if statusCode < 200 || statusCode >= 300 {
+		return
+	}
+
 	// Ensure proper Content-Type with charset for .ics files
 	// Some CalDAV clients are sensitive to missing charset
 	ct := w.ResponseWriter.Header().Get("Content-Type")

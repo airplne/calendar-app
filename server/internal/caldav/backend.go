@@ -158,7 +158,7 @@ func (b *Backend) GetCalendarObject(ctx context.Context, urlPath string, req *ca
 		return nil, fmt.Errorf("failed to get event: %w", err)
 	}
 
-	return b.domainEventToCalDAV(event, urlPath), nil
+	return b.domainEventToCalDAV(event, urlPath)
 }
 
 // ListCalendarObjects returns all events in a calendar
@@ -182,7 +182,12 @@ func (b *Backend) ListCalendarObjects(ctx context.Context, urlPath string, req *
 	result := make([]caldav.CalendarObject, 0, len(events))
 	for _, event := range events {
 		objPath := fmt.Sprintf("%s%s.ics", ensureTrailingSlash(urlPath), event.UID)
-		result = append(result, *b.domainEventToCalDAV(event, objPath))
+		calObj, err := b.domainEventToCalDAV(event, objPath)
+		if err != nil {
+			// Fail the entire operation on first parse error (strict approach)
+			return nil, err
+		}
+		result = append(result, *calObj)
 	}
 	return result, nil
 }
@@ -214,7 +219,12 @@ func (b *Backend) QueryCalendarObjects(ctx context.Context, urlPath string, quer
 	result := make([]caldav.CalendarObject, 0, len(events))
 	for _, event := range events {
 		objPath := fmt.Sprintf("%s%s.ics", ensureTrailingSlash(urlPath), event.UID)
-		result = append(result, *b.domainEventToCalDAV(event, objPath))
+		calObj, err := b.domainEventToCalDAV(event, objPath)
+		if err != nil {
+			// Fail the entire operation on first parse error (strict approach)
+			return nil, err
+		}
+		result = append(result, *calObj)
 	}
 	return result, nil
 }
@@ -306,7 +316,7 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalDat
 		}
 
 		slog.Info("caldav.event.created", "username", user.Username, "calendar", calName, "uid", uid, "etag", etag)
-		return b.domainEventToCalDAV(event, urlPath), nil
+		return b.domainEventToCalDAV(event, urlPath)
 	}
 
 	// Updating existing event
@@ -361,7 +371,7 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, icalDat
 	}
 
 	slog.Info("caldav.event.updated", "username", user.Username, "calendar", calName, "uid", uid, "etag", etag)
-	return b.domainEventToCalDAV(existing, urlPath), nil
+	return b.domainEventToCalDAV(existing, urlPath)
 }
 
 // DeleteCalendarObject removes an event
@@ -419,13 +429,18 @@ func (b *Backend) domainCalendarToCalDAV(cal *domain.Calendar, username string) 
 	}
 }
 
-func (b *Backend) domainEventToCalDAV(event *domain.Event, urlPath string) *caldav.CalendarObject {
+func (b *Backend) domainEventToCalDAV(event *domain.Event, urlPath string) (*caldav.CalendarObject, error) {
 	// Parse ICS string back to ical.Calendar
 	icalCal, err := parseICalendar(event.ICS)
 	if err != nil {
-		slog.Error("failed to parse stored ICS", "error", err, "uid", event.UID)
-		// Return empty calendar on error to avoid crashes
-		icalCal = ical.NewCalendar()
+		// Log error with safe fields only (never log raw ICS - security)
+		slog.Error("failed to parse stored ICS",
+			"error", err,
+			"uid", event.UID,
+			"calendar_id", event.CalendarID,
+		)
+		// Return explicit error instead of empty calendar
+		return nil, webdav.NewHTTPError(500, fmt.Errorf("corrupt stored ICS for event %s", event.UID))
 	}
 
 	return &caldav.CalendarObject{
@@ -433,7 +448,7 @@ func (b *Backend) domainEventToCalDAV(event *domain.Event, urlPath string) *cald
 		ModTime: event.UpdatedAt,
 		ETag:    event.ETag,
 		Data:    icalCal,
-	}
+	}, nil
 }
 
 // Context key for user

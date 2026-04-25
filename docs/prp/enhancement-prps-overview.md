@@ -91,7 +91,7 @@ Raw ICS + ETag correctness
 4. `feat(web): add proposal card`
 5. `feat(web): add diff preview`
 6. `feat(web): add apply and undo flows`
-7. `feat/web): add reject proposal dialog`
+7. `feat(web): add reject proposal dialog`
 8. `test(web): add first-aha UX tests`
 9. `docs(ux): document first aha flow`
 

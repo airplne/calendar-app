@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -111,7 +112,7 @@ func operationFixture(id string, occurredAt time.Time) *domain.CalDAVOperation {
 	}
 }
 
-func openOperationTestDB(t *testing.T) *DBWrapper {
+func openOperationTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := OpenDB(t.TempDir())
 	if err != nil {

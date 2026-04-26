@@ -47,6 +47,11 @@ func NewHandler() http.Handler {
 // The db parameter is required for transaction support (atomic event write + sync token bump).
 // The calendarRepo and eventRepo must be concrete SQLite repos to support WithTx.
 func NewHandlerWithRepos(db *sql.DB, userRepo domain.UserRepo, calendarRepo *data.SQLiteCalendarRepo, eventRepo *data.SQLiteEventRepo) http.Handler {
+	return NewHandlerWithReposAndOperationRecorder(db, userRepo, calendarRepo, eventRepo, data.NewSQLiteCalDAVOperationRepo(db))
+}
+
+// NewHandlerWithReposAndOperationRecorder creates the real CalDAV handler with optional redacted operation recording.
+func NewHandlerWithReposAndOperationRecorder(db *sql.DB, userRepo domain.UserRepo, calendarRepo *data.SQLiteCalendarRepo, eventRepo *data.SQLiteEventRepo, operationRepo domain.CalDAVOperationRepo) http.Handler {
 	authConfig := LoadAuthConfig()
 
 	backend := NewBackend(db, userRepo, calendarRepo, eventRepo)
@@ -59,6 +64,9 @@ func NewHandlerWithRepos(db *sql.DB, userRepo domain.UserRepo, calendarRepo *dat
 
 	// Create Chi router for CalDAV routes
 	r := chi.NewRouter()
+
+	// Record redacted CalDAV operation metadata before auth so auth failures are visible.
+	r.Use(OperationMetadataMiddleware(operationRepo))
 
 	// Apply Basic Auth middleware
 	r.Use(BasicAuthMiddleware(authConfig, userRepo))

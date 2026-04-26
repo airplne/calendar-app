@@ -153,7 +153,6 @@ func BuildCalDAVOperation(method string, rawPath string, statusCode int, duratio
 		PathPattern:       RedactCalDAVPath(rawPath),
 		StatusCode:        statusCode,
 		DurationMillis:    duration.Milliseconds(),
-		ClientUserAgent:   userAgent,
 		ClientFingerprint: NormalizeClientFingerprint(userAgent),
 		ETagOutcome:       etagOutcome,
 		OperationKind:     kind,

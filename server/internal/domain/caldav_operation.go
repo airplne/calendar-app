@@ -92,6 +92,34 @@ func (op CalDAVOperation) IsETagConflict() bool {
 	return op.ErrorCode == CalDAVErrorETagConflict || op.ETagOutcome == CalDAVETagMismatched
 }
 
+// SummarizeCalDAVOperations adapts redacted operation records into the issue #11
+// Sync Health evaluator input shape. This keeps future APIs/debug bundles from
+// needing raw event data to compute health.
+func SummarizeCalDAVOperations(operations []*CalDAVOperation) RecentOperationSummary {
+	summary := RecentOperationSummary{HasRecentOperationData: len(operations) > 0}
+	for _, op := range operations {
+		if op == nil {
+			continue
+		}
+		if op.IsWriteFailure() {
+			summary.WriteFailures++
+		}
+		if op.IsETagConflict() {
+			summary.ETagConflicts++
+		}
+		if op.IsRecoverableFailure() {
+			summary.RecoverableClientSyncFailures++
+		}
+		if op.IsIntegrityFailure() {
+			summary.CorruptICSIncidents++
+		}
+		if op.ErrorCode == CalDAVErrorDuplicateUID {
+			summary.UnresolvedDuplicateUIDs++
+		}
+	}
+	return summary
+}
+
 // CalDAVOperationRepo persists redacted operation metadata. Implementations must
 // enforce bounded retention and must not persist raw calendar data.
 type CalDAVOperationRepo interface {

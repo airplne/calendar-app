@@ -53,9 +53,9 @@ func (r *SQLiteCalDAVOperationRepo) Record(operation *domain.CalDAVOperation) er
 	query := `
 		INSERT INTO caldav_operations (
 			operation_id, occurred_at, method, path_pattern, status_code, duration_ms,
-			client_user_agent, client_fingerprint, etag_outcome, operation_kind, outcome,
+			client_fingerprint, etag_outcome, operation_kind, outcome,
 			error_code, redacted_error, request_size_bytes, response_size_bytes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(context.Background(), query,
 		operation.ID,
@@ -64,7 +64,6 @@ func (r *SQLiteCalDAVOperationRepo) Record(operation *domain.CalDAVOperation) er
 		operation.PathPattern,
 		operation.StatusCode,
 		operation.DurationMillis,
-		operation.ClientUserAgent,
 		operation.ClientFingerprint,
 		string(operation.ETagOutcome),
 		string(operation.OperationKind),
@@ -106,7 +105,7 @@ func (r *SQLiteCalDAVOperationRepo) ListRecent(ctx context.Context, limit int) (
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT operation_id, occurred_at, method, path_pattern, status_code, duration_ms,
-		       client_user_agent, client_fingerprint, etag_outcome, operation_kind, outcome,
+		       client_fingerprint, etag_outcome, operation_kind, outcome,
 		       error_code, redacted_error, request_size_bytes, response_size_bytes
 		FROM caldav_operations
 		ORDER BY occurred_at DESC, id DESC
@@ -128,7 +127,6 @@ func (r *SQLiteCalDAVOperationRepo) ListRecent(ctx context.Context, limit int) (
 			&op.PathPattern,
 			&op.StatusCode,
 			&op.DurationMillis,
-			&op.ClientUserAgent,
 			&op.ClientFingerprint,
 			&etagOutcome,
 			&kind,

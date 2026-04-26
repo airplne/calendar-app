@@ -21,6 +21,7 @@ Current repo assumptions:
 - Raw ICS is canonical for CalDAV roundtrip fidelity.
 - ETags are derived from stored ICS bytes.
 - Corrupt stored ICS must fail visibly, not silently return empty data.
+- MVP CalDAV auth uses the existing HTTP Basic Auth / environment credential path.
 
 ---
 
@@ -41,6 +42,7 @@ Calendar-app needs an explicit "CalDAV works before AI" gate: users should prove
 - Add onboarding that guides users to green sync before Todoist/LLM setup.
 - Strengthen data-safety checks around roundtrip fidelity, stale ETags, duplicate UIDs, and corrupt ICS.
 - Make sync failures diagnosable by client fingerprint, operation type, status, and redacted error.
+- Keep MVP auth simple by reusing the existing Basic Auth/env credential path.
 
 ---
 
@@ -53,21 +55,41 @@ Calendar-app needs an explicit "CalDAV works before AI" gate: users should prove
 - No hosted multi-tenant admin console.
 - No raw ICS/event descriptions in default logs, dashboard rows, or debug bundles.
 - No broad observability platform dependency.
+- No new credential model in this PRP.
+- No app-specific password generation, password rotation, or per-client credentials in MVP.
 
 ---
 
-## 5. User stories
+## 5. MVP Auth Decision
 
-1. As a self-hosting user, I can see the correct CalDAV URL and app-specific password instructions, connect Apple Calendar or DAVx5, and run a validation event to prove sync works.
+For MVP, Calendar-app will reuse the existing HTTP Basic Auth / environment credential path, currently configured through `CALENDARAPP_USER` and `CALENDARAPP_PASS`.
+
+The onboarding UI should display:
+
+- configured CalDAV username instructions,
+- configured password instructions,
+- server URL,
+- principal/calendar URL guidance where needed,
+- client setup recipes for supported CalDAV clients.
+
+The onboarding UI should not create, rotate, or manage per-client app-specific passwords in this PRP.
+
+App-specific CalDAV passwords are a post-MVP enhancement and should be tracked separately. A future credential PRP should define schema, generation endpoint, rotation/revocation UX, per-client labels, and tests.
+
+---
+
+## 6. User stories
+
+1. As a self-hosting user, I can see the correct CalDAV URL and Basic Auth credential instructions, connect Apple Calendar or DAVx5, and run a validation event to prove sync works.
 2. As a beta user, I can read a repo doc showing which CalDAV clients pass create/edit/delete testing and known quirks.
-3. As an operator, I can open Sync Health and see recent PROPFIND/REPORT/GET/PUT/DELETE operations with user-agent fingerprints, status codes, ETag outcomes, and durations.
+3. As an operator, I can open Sync Health and see recent PROPFIND/REPORT/GET/PUT/DELETE operations with client fingerprints, status codes, ETag outcomes, and durations.
 4. As a privacy-conscious user, I can export a debug bundle that excludes raw ICS, event descriptions, attendee names, and task details by default.
 5. As a user, I get a visible error when stored ICS is corrupt; the server never returns a false successful empty calendar.
 6. As a user, I can see that a stale ETag write was rejected with HTTP 412 and which client caused it.
 
 ---
 
-## 6. Functional requirements
+## 7. Functional requirements
 
 ### FR1 - CalDAV interop evidence
 
@@ -99,7 +121,9 @@ Required clients:
 
 Pass threshold:
 
-- At least 2 of Apple Calendar, Fantastical, and DAVx5 must pass manual CRUD.
+- Apple Calendar, Fantastical, and DAVx5 must all be represented in `docs/testing/caldav-interop-results.md`.
+- At least 2 of Apple Calendar, Fantastical, and DAVx5 must pass manual CRUD for MVP.
+- Non-passing or not-yet-tested clients must be documented with status, reason, and follow-up issue.
 
 ### FR2 - Sync operation logging
 
@@ -135,6 +159,17 @@ Redaction rules:
 - Do not log attendee names/emails.
 - Do not log full path segments that may contain user-supplied event names.
 - Hash UID and path identifiers where needed.
+- Raw `client_user_agent` may be stored locally for self-hosted diagnostics, but exported debug bundles should normalize or redact unusually identifying user-agent values by default.
+
+Debug bundles may include normalized client fingerprints such as:
+
+- `apple-calendar`.
+- `fantastical`.
+- `davx5`.
+- `thunderbird`.
+- `unknown-caldav-client`.
+
+Raw user-agent export requires explicit user opt-in.
 
 ### FR3 - Sync Health dashboard
 
@@ -165,7 +200,50 @@ Recent operation table columns:
 - Duration.
 - Redacted error.
 
-### FR4 - Sync Health API
+### FR4 - Sync Health status rules
+
+Status computation must be deterministic. Exact thresholds should be implementation-configurable, but MVP defaults must be documented and tested.
+
+`Healthy`
+
+- Green-sync validation completed successfully.
+- Last validation event create/edit/delete passed.
+- No CalDAV write failures in the recent operation window.
+- No corrupt ICS incidents in the recent operation window.
+- No unresolved duplicate UID incidents.
+- ETag conflicts, if present, are expected HTTP 412 conflicts and below warning threshold.
+
+`Warning`
+
+- Green-sync validation completed previously but recent operations show recoverable failures.
+- Recent ETag conflicts exceed threshold.
+- A supported client has recent sync failures but data integrity is not known to be compromised.
+- Validation is stale and should be rerun.
+
+`Critical`
+
+- Corrupt stored ICS detected.
+- Duplicate UID incident unresolved.
+- PUT/GET roundtrip validation failed.
+- Green-sync validation failed.
+- Calendar write path is failing.
+- Data integrity may be at risk.
+
+`Unknown`
+
+- Green-sync validation has not been completed.
+- No recent client operation data exists.
+- Server cannot determine sync health.
+
+MVP default thresholds:
+
+- Recent operation window: latest 50 operations or last 24 hours, whichever has data.
+- Warning threshold for expected ETag conflicts: more than 5 stale-write conflicts in the recent operation window.
+- Validation stale threshold: green-sync validation older than 14 days.
+- Any corrupt ICS incident in the recent operation window is `Critical` until resolved or explicitly acknowledged by future tooling.
+- Any unresolved duplicate UID incident is `Critical` until resolved.
+
+### FR5 - Sync Health API
 
 Add REST endpoints:
 
@@ -185,6 +263,8 @@ Example `GET /api/v1/sync-health` response:
   "status": "healthy",
   "last_success_at": "2026-04-25T14:05:02Z",
   "last_failure_at": null,
+  "green_sync_completed": true,
+  "green_sync_completed_at": "2026-04-25T13:50:00Z",
   "operation_counts_24h": {
     "total": 128,
     "success": 126,
@@ -200,7 +280,7 @@ Example `GET /api/v1/sync-health` response:
   },
   "clients": [
     {
-      "fingerprint": "apple-calendar-macos-redacted",
+      "fingerprint": "apple-calendar",
       "display_name": "Apple Calendar",
       "last_seen_at": "2026-04-25T14:00:00Z",
       "operation_count_24h": 44
@@ -209,9 +289,13 @@ Example `GET /api/v1/sync-health` response:
 }
 ```
 
-### FR5 - Debug bundle export
+### FR6 - Debug bundle export
 
 Add a debug bundle export as `.zip` or `.tar.gz`.
+
+`/api/v1/debug-bundle` must require authenticated local admin/session access. It must never be publicly accessible.
+
+Debug bundle export should be auditable in local logs with timestamp and authenticated user/session identifier, but without raw event content.
 
 Default contents:
 
@@ -234,6 +318,7 @@ Default exclusions:
 - Passwords.
 - Authorization headers.
 - Session cookies.
+- Raw user-agent strings when they look unusually identifying.
 
 Optional explicit toggle:
 
@@ -246,14 +331,15 @@ Rules:
 - UI must display a warning before raw event data inclusion.
 - Raw data export must require explicit user action.
 - Include manifest flag: `"raw_event_data_included": true`.
+- Raw user-agent export requires explicit user opt-in, separate from normalized fingerprint export.
 
-### FR6 - Onboarding gate
+### FR7 - Onboarding gate
 
 Add onboarding sequence:
 
 1. Show server status.
 2. Show CalDAV URL: `https://<host>/dav/`, principal URL if needed, and calendar home URL pattern if needed.
-3. Generate or display app-specific CalDAV password.
+3. Display configured CalDAV username/password instructions from the existing Basic Auth/env credential path.
 4. Show client setup recipes for Apple Calendar, Fantastical, DAVx5, and optionally Thunderbird.
 5. Start validation event flow:
    - User creates event from external client.
@@ -264,6 +350,14 @@ Add onboarding sequence:
 8. Unlock Todoist setup.
 9. Unlock LLM setup.
 
+MVP credential scope:
+
+- Do not create a new credential model.
+- Do not add password-generation endpoints.
+- Do not add password-rotation UI.
+- Do not add per-client credentials.
+- App-specific CalDAV passwords are post-MVP.
+
 Validation event:
 
 - Suggested event title: `Calendar-app Sync Test`.
@@ -272,7 +366,7 @@ Validation event:
 
 Failure states must include explanation, last observed operation, suggested next step, debug bundle link, and client-specific guidance.
 
-### FR7 - Data safety checks
+### FR8 - Data safety checks
 
 Automated and runtime behavior must guarantee:
 
@@ -285,32 +379,47 @@ Automated and runtime behavior must guarantee:
 - UID uniqueness remains enforced at DB level.
 - Any parse or storage failure is logged with redacted metadata.
 
+### FR9 - Retention cleanup
+
+Sync operation logs must have a bounded retention policy.
+
+MVP default:
+
+- retain the latest 1,000 operations, or
+- retain 14 days of operations,
+- whichever limit is reached first.
+
+A cleanup job or write-time pruning must enforce this retention.
+
 ---
 
-## 7. Non-functional requirements
+## 8. Non-functional requirements
 
 - Privacy: no raw event content in logs or default debug bundles.
 - Reliability: sync health instrumentation must not break CalDAV request handling.
 - Performance: logging overhead should add less than 10ms p95 for typical CalDAV operations.
 - Durability: operation logs should survive restarts with bounded retention.
-- Retention: default keep recent operation metadata for 7 days or last 1,000 operations, whichever is smaller.
+- Retention: latest 1,000 operations or 14 days, whichever limit is reached first.
 - Accessibility: Sync Health and onboarding UI must meet WCAG 2.1 AA.
 - Local-first: diagnostics are generated locally by the self-hosted instance.
+- Auth: debug bundle access requires authenticated local admin/session access.
 - Graceful degradation: if metrics persistence fails, CalDAV operations continue and log a redacted warning.
 
 ---
 
-## 8. Technical approach
+## 9. Technical approach
 
 ### Backend
 
 Add an instrumentation layer around the CalDAV handler/middleware:
 
 - Generate `operation_id` at request start.
-- Capture method, path shape, user agent, start time, response status, duration.
+- Capture method, path shape, normalized client fingerprint, start time, response status, duration.
+- Store raw user agent locally only when useful for self-hosted diagnostics.
 - Extract safe authenticated user/calendar/event identifiers where possible.
 - Capture ETag/precondition outcomes from backend errors where possible.
 - Persist operation metadata to SQLite.
+- Enforce retention by cleanup job or write-time pruning.
 
 Add explicit domain errors:
 
@@ -330,10 +439,11 @@ type SyncHealthService interface {
     Clients(ctx context.Context) ([]ClientFingerprint, error)
     StartValidationEvent(ctx context.Context, userID int64) (*ValidationSession, error)
     VerifyValidationEvent(ctx context.Context, sessionID string) (*ValidationResult, error)
+    PruneOperations(ctx context.Context, policy RetentionPolicy) error
 }
 
 type DebugBundleService interface {
-    Build(ctx context.Context, opts DebugBundleOptions) (*DebugBundle, error)
+    Build(ctx context.Context, userID int64, opts DebugBundleOptions) (*DebugBundle, error)
 }
 ```
 
@@ -354,7 +464,7 @@ Use TanStack Query for:
 
 ---
 
-## 9. Files likely to change
+## 10. Files likely to change
 
 Backend:
 
@@ -405,7 +515,7 @@ server/internal/services/debug_bundle_test.go
 
 ---
 
-## 10. API changes
+## 11. API changes
 
 ```http
 GET  /api/v1/sync-health
@@ -417,9 +527,11 @@ GET  /api/v1/debug-bundle
 GET  /api/v1/debug-bundle?include_raw_event_data=true
 ```
 
+No credential-generation API is included in MVP.
+
 ---
 
-## 11. Database/schema changes
+## 12. Database/schema changes
 
 Create migration `server/migrations/00002_sync_health.sql`.
 
@@ -472,9 +584,11 @@ CREATE TABLE sync_validation_sessions (
 );
 ```
 
+No credential schema changes are required in this PRP.
+
 ---
 
-## 12. UX changes
+## 13. UX changes
 
 ### Onboarding checklist
 
@@ -482,7 +596,8 @@ CREATE TABLE sync_validation_sessions (
 CalDAV setup
 
 [ ] Server is running
-[ ] App-specific password created
+[ ] CalDAV URL displayed
+[ ] Basic Auth username/password instructions displayed
 [ ] Connect one calendar client
 [ ] Create validation event
 [ ] Edit validation event
@@ -505,7 +620,7 @@ p95 operation duration: 180ms
 
 ---
 
-## 13. Test plan
+## 14. Test plan
 
 Automated tests:
 
@@ -513,14 +628,21 @@ Automated tests:
 - `TestCalDAVOperationLoggedOnGET`.
 - `TestCalDAVOperationLogsNoRawICS`.
 - `TestSyncHealthSummaryCountsETagConflicts`.
+- `TestSyncHealthStatusHealthy`.
+- `TestSyncHealthStatusWarning`.
+- `TestSyncHealthStatusCritical`.
+- `TestSyncHealthStatusUnknown`.
+- `TestDebugBundleRequiresAuthenticatedAccess`.
 - `TestDebugBundleExcludesRawICSByDefault`.
 - `TestDebugBundleExcludesEventDescriptionsByDefault`.
+- `TestDebugBundleNormalizesClientUserAgentsByDefault`.
 - `TestDebugBundleIncludesRawDataOnlyWithExplicitOption`.
 - `TestValidationEventCreateEditDeleteFlow`.
 - `TestStaleETagReturns412AndIncrementsConflictCount`.
 - `TestDuplicateUIDRejectedAndLogged`.
 - `TestCorruptStoredICSReturns500AndLogged`.
 - `TestPUTGETRoundtripPreservesICS`.
+- `TestOperationRetentionPrunesOldRows`.
 
 Manual tests:
 
@@ -533,13 +655,13 @@ Manual tests:
 
 ---
 
-## 14. Manual validation steps
+## 15. Manual validation steps
 
 1. Run `cd server && go test ./...`.
-2. Start the server.
+2. Start the server with `CALENDARAPP_USER` and `CALENDARAPP_PASS` configured.
 3. Open onboarding.
-4. Generate app-specific password.
-5. Add Apple Calendar account using `/dav/`.
+4. Confirm the CalDAV URL and Basic Auth credential instructions are displayed.
+5. Add Apple Calendar account using `/dav/` and the configured Basic Auth credentials.
 6. Create `Calendar-app Sync Test`.
 7. Confirm UI detects create.
 8. Edit test event.
@@ -548,62 +670,71 @@ Manual tests:
 11. Confirm UI shows green sync.
 12. Open Sync Health.
 13. Confirm recent operations show methods/status/duration/client without raw content.
-14. Export default debug bundle.
-15. Inspect bundle for raw ICS/event descriptions; none should exist.
+14. Export default debug bundle while authenticated.
+15. Inspect bundle for raw ICS/event descriptions/raw identifying UA; none should exist by default.
 16. Repeat with DAVx5 or Fantastical.
 17. Update `docs/testing/caldav-interop-results.md`.
 
 ---
 
-## 15. Acceptance criteria
+## 16. Acceptance criteria
 
 - `go test ./...` passes.
 - PUT -> GET roundtrip preserves event data.
 - Stale ETag writes return HTTP 412.
+- Apple Calendar, Fantastical, and DAVx5 are all represented in `docs/testing/caldav-interop-results.md`.
 - At least 2 of Apple Calendar, Fantastical, and DAVx5 pass manual CRUD testing.
 - Sync Health page shows latest client operations without leaking raw event content.
-- Debug bundle exports redacted diagnostics.
+- Sync Health statuses use deterministic Healthy / Warning / Critical / Unknown rules.
+- Debug bundle endpoint requires authenticated local admin/session access.
+- Debug bundle exports redacted diagnostics by default.
 - Debug bundle raw event data requires explicit user opt-in.
+- Raw user-agent export requires explicit user opt-in.
 - Onboarding can verify create/edit/delete from at least one external CalDAV client.
+- Onboarding uses existing Basic Auth/env credentials and does not generate app-specific passwords.
 - Todoist/LLM setup is visually and functionally gated behind green sync.
 - `docs/testing/caldav-interop-results.md` exists and is updated.
 - Corrupt stored ICS fails visibly and increments corrupt incident count.
 - Duplicate UID attempts are rejected and visible in Sync Health.
+- Operation log retention is enforced by cleanup job or write-time pruning.
 
 ---
 
-## 16. Risks and mitigations
+## 17. Risks and mitigations
 
 | Risk | Impact | Mitigation |
 |---|---:|---|
 | Logs leak private data | Critical | Redaction tests, bundle inspection tests, no raw ICS by default |
+| Debug bundle is exposed without auth | Critical | Require authenticated local admin/session access and audit bundle export |
 | Instrumentation breaks CalDAV | High | Middleware-only logging, fail-open if logging persistence fails |
 | Client-specific quirks consume scope | Medium | Document quirks; require 2 of 3 primary clients, Thunderbird optional |
 | Validation event false negatives | Medium | Use operation log + repository state; provide manual retry |
+| Operation logs grow without bound | Medium | Retention cleanup: latest 1,000 operations or 14 days |
 | Debug bundle grows large | Low | Retention limits, compressed bundle, metadata-only default |
 | Sync Health creates anxiety | Low | Explain statuses and next actions clearly |
 
 ---
 
-## 17. Open questions
+## 18. Open questions
 
-- Should app-specific CalDAV passwords be implemented in this PRP or can dev env Basic Auth remain for the first version?
-- What retention default is best: 7 days, last 1,000 operations, or both?
 - Should Sync Health be visible before login for local single-user setups, or authenticated only?
-- Should client fingerprinting normalize known clients into friendly names?
+- Should client fingerprinting normalize additional clients beyond Apple Calendar, Fantastical, DAVx5, and Thunderbird?
 - Should validation event run against the default calendar only?
+- Should post-MVP app-specific CalDAV passwords be per-device, per-client, or both?
 
 ---
 
-## 18. Suggested GitHub issue breakdown
+## 19. Suggested GitHub issue breakdown
 
 1. `feat(server): add CalDAV operation metadata logging`
 2. `feat(server): add sync health repository and summary service`
 3. `feat(api): expose sync health endpoints`
 4. `feat(server): add redacted debug bundle export`
 5. `feat(web): add Sync Health dashboard`
-6. `feat(web): add CalDAV onboarding gate`
+6. `feat(web): add CalDAV onboarding gate using Basic Auth/env credentials`
 7. `test(caldav): add validation-event flow tests`
 8. `test(caldav): add stale ETag, duplicate UID, corrupt ICS diagnostics tests`
-9. `docs(testing): add CalDAV interop results matrix`
-10. `docs(setup): add Apple Calendar, Fantastical, DAVx5 setup recipes`
+9. `test(sync): add health status and retention tests`
+10. `docs(testing): add CalDAV interop results matrix`
+11. `docs(setup): add Apple Calendar, Fantastical, DAVx5 setup recipes`
+12. `post-mvp: design app-specific CalDAV password model`

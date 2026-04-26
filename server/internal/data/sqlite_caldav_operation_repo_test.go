@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,6 @@ func TestSQLiteCalDAVOperationRepo_RecordAndListRecent(t *testing.T) {
 		PathPattern:       "/dav/calendars/{principal}/{calendar}/{object}.ics",
 		StatusCode:        412,
 		DurationMillis:    25,
-		ClientUserAgent:   "Fantastical/4.0",
 		ClientFingerprint: domain.CalDAVClientFantastical,
 		ETagOutcome:       domain.CalDAVETagMismatched,
 		OperationKind:     domain.CalDAVOperationWrite,
@@ -43,8 +43,59 @@ func TestSQLiteCalDAVOperationRepo_RecordAndListRecent(t *testing.T) {
 		t.Fatalf("len(operations) = %d, want 1", len(operations))
 	}
 	got := operations[0]
-	if got.ID != op.ID || got.Method != op.Method || got.PathPattern != op.PathPattern || got.ErrorCode != op.ErrorCode {
+	if got.ID != op.ID || got.Method != op.Method || got.PathPattern != op.PathPattern || got.ErrorCode != op.ErrorCode || got.ClientFingerprint != op.ClientFingerprint {
 		t.Fatalf("operation mismatch: got %+v want %+v", got, op)
+	}
+}
+
+func TestSQLiteCalDAVOperationRepo_DoesNotPersistRawUserAgent(t *testing.T) {
+	db := openOperationTestDB(t)
+	repo := NewSQLiteCalDAVOperationRepoWithRetention(db, 10, 14*24*time.Hour)
+	privateUA := "PrivateDeviceName/SecretBuildToken CalendarClient"
+
+	op := operationFixture("op-private-ua", time.Now().UTC())
+	op.ClientFingerprint = domain.CalDAVClientUnknown
+	if err := repo.Record(op); err != nil {
+		t.Fatalf("Record() error = %v", err)
+	}
+
+	operations, err := repo.ListRecent(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(operations) != 1 {
+		t.Fatalf("len(operations) = %d, want 1", len(operations))
+	}
+	if operations[0].ClientFingerprint != domain.CalDAVClientUnknown {
+		t.Fatalf("ClientFingerprint = %q, want %q", operations[0].ClientFingerprint, domain.CalDAVClientUnknown)
+	}
+
+	var tableSQL string
+	if err := db.QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'caldav_operations'`).Scan(&tableSQL); err != nil {
+		t.Fatalf("failed to read table schema: %v", err)
+	}
+	if strings.Contains(tableSQL, "client_user_agent") {
+		t.Fatalf("caldav_operations schema should not include raw user-agent column: %s", tableSQL)
+	}
+
+	rows, err := db.QueryContext(context.Background(), `SELECT operation_id, method, path_pattern, client_fingerprint, etag_outcome, operation_kind, outcome, error_code, redacted_error FROM caldav_operations`)
+	if err != nil {
+		t.Fatalf("failed to query persisted metadata: %v", err)
+	}
+	defer rows.Close()
+	var persisted strings.Builder
+	for rows.Next() {
+		var cols [9]string
+		if err := rows.Scan(&cols[0], &cols[1], &cols[2], &cols[3], &cols[4], &cols[5], &cols[6], &cols[7], &cols[8]); err != nil {
+			t.Fatalf("failed to scan persisted metadata: %v", err)
+		}
+		persisted.WriteString(strings.Join(cols[:], " "))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("failed to iterate persisted metadata: %v", err)
+	}
+	if strings.Contains(persisted.String(), privateUA) || strings.Contains(persisted.String(), "SecretBuildToken") || strings.Contains(persisted.String(), "PrivateDeviceName") {
+		t.Fatalf("persisted metadata leaked raw user-agent: %q", persisted.String())
 	}
 }
 

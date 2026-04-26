@@ -57,7 +57,7 @@ const (
 
 // CalDAVOperation is redacted request metadata used by Sync Health and diagnostics.
 // It intentionally stores no raw ICS, event body, title, description, attendee,
-// task, LLM, or Todoist content.
+// task, LLM, Todoist content, or raw user-agent by default.
 type CalDAVOperation struct {
 	ID                string
 	OccurredAt        time.Time
@@ -65,7 +65,6 @@ type CalDAVOperation struct {
 	PathPattern       string
 	StatusCode        int
 	DurationMillis    int64
-	ClientUserAgent   string
 	ClientFingerprint string
 	ETagOutcome       CalDAVETagOutcome
 	OperationKind     CalDAVOperationKind
@@ -89,7 +88,7 @@ func (op CalDAVOperation) IsIntegrityFailure() bool {
 }
 
 func (op CalDAVOperation) IsETagConflict() bool {
-	return op.ErrorCode == CalDAVErrorETagConflict || op.ETagOutcome == CalDAVETagMismatched
+	return op.ErrorCode == CalDAVErrorETagConflict || op.ETagOutcome == CalDAVETagMismatched || op.StatusCode == 412
 }
 
 // SummarizeCalDAVOperations adapts redacted operation records into the issue #11
@@ -101,20 +100,29 @@ func SummarizeCalDAVOperations(operations []*CalDAVOperation) RecentOperationSum
 		if op == nil {
 			continue
 		}
+
 		if op.IsWriteFailure() {
 			summary.WriteFailures++
-		}
-		if op.IsETagConflict() {
-			summary.ETagConflicts++
 		}
 		if op.IsRecoverableFailure() {
 			summary.RecoverableClientSyncFailures++
 		}
-		if op.IsIntegrityFailure() {
-			summary.CorruptICSIncidents++
+		if op.IsETagConflict() {
+			summary.ETagConflicts++
 		}
-		if op.ErrorCode == CalDAVErrorDuplicateUID {
+		if op.OperationKind == CalDAVOperationWrite && op.StatusCode >= 500 {
+			summary.CalendarWritePathFailing = true
+		}
+
+		switch op.ErrorCode {
+		case CalDAVErrorCorruptICS, CalDAVErrorParse:
+			summary.CorruptICSIncidents++
+		case CalDAVErrorDuplicateUID:
 			summary.UnresolvedDuplicateUIDs++
+		case CalDAVErrorWriteFailed:
+			if op.OperationKind == CalDAVOperationWrite {
+				summary.CalendarWritePathFailing = true
+			}
 		}
 	}
 	return summary

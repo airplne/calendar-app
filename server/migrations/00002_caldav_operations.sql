@@ -1,6 +1,6 @@
 -- +goose Up
 -- Redacted CalDAV operation metadata for Sync Health diagnostics.
--- Stores request metadata only; never stores raw ICS or event descriptions.
+-- Stores request metadata only; never stores raw ICS, event descriptions, or raw user-agent strings.
 
 CREATE TABLE IF NOT EXISTS caldav_operations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS caldav_operations (
     path_pattern TEXT NOT NULL,
     status_code INTEGER NOT NULL,
     duration_ms INTEGER NOT NULL,
-    client_user_agent TEXT,
     client_fingerprint TEXT NOT NULL,
     etag_outcome TEXT NOT NULL,
     operation_kind TEXT NOT NULL,

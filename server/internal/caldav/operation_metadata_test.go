@@ -72,7 +72,9 @@ func TestOperationClassification(t *testing.T) {
 		t.Fatalf("GET outcome = %q, want success", readOp.Outcome)
 	}
 
-	writeOp := BuildCalDAVOperation("PUT", "/dav/calendars/user/default/event.ics", http.StatusCreated, 10*time.Millisecond, http.Header{}, http.Header{"ETag": []string{"abc"}}, "Custom/1", 200, 0)
+	responseHeader := http.Header{}
+	responseHeader.Set("ETag", "abc")
+	writeOp := BuildCalDAVOperation("PUT", "/dav/calendars/user/default/event.ics", http.StatusCreated, 10*time.Millisecond, http.Header{}, responseHeader, "Custom/1", 200, 0)
 	if writeOp.OperationKind != domain.CalDAVOperationWrite {
 		t.Fatalf("PUT kind = %q, want write", writeOp.OperationKind)
 	}

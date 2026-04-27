@@ -23,13 +23,11 @@ type DebugBundleOptions struct {
 	Environment   string
 	DataDir       string
 	MigrationsDir string
-	GeneratedBy   string
 }
 
 type DebugBundle struct {
 	SchemaVersion string                 `json:"schema_version"`
 	GeneratedAt   time.Time              `json:"generated_at"`
-	GeneratedBy   string                 `json:"generated_by,omitempty"`
 	Redaction     DebugBundleRedaction   `json:"redaction"`
 	Server        DebugBundleServer      `json:"server"`
 	Config        DebugBundleConfig      `json:"config"`
@@ -66,14 +64,14 @@ type DebugBundleRuntime struct {
 }
 
 type DebugBundleSyncHealth struct {
-	Status             string                     `json:"status"`
-	EvaluatedAt         time.Time                  `json:"evaluated_at"`
-	Reasons             []DebugBundleReason        `json:"reasons"`
-	GreenSyncCompleted bool                       `json:"green_sync_completed"`
-	GreenSyncState     string                     `json:"green_sync_state"`
-	OperationCounts    SyncOperationCounts         `json:"operation_counts"`
-	Latency            SyncLatency                 `json:"latency_ms"`
-	Clients            []SyncClientSummary         `json:"clients"`
+	Status             string              `json:"status"`
+	EvaluatedAt         time.Time           `json:"evaluated_at"`
+	Reasons             []DebugBundleReason `json:"reasons"`
+	GreenSyncCompleted bool                `json:"green_sync_completed"`
+	GreenSyncState     string              `json:"green_sync_state"`
+	OperationCounts    SyncOperationCounts  `json:"operation_counts"`
+	Latency            SyncLatency          `json:"latency_ms"`
+	Clients            []SyncClientSummary  `json:"clients"`
 }
 
 type DebugBundleReason struct {
@@ -133,7 +131,6 @@ func (s *DebugBundleService) Build(ctx context.Context) (*DebugBundle, error) {
 	bundle := &DebugBundle{
 		SchemaVersion: DebugBundleSchemaVersion,
 		GeneratedAt:   time.Now().UTC(),
-		GeneratedBy:   s.options.GeneratedBy,
 		Redaction: DebugBundleRedaction{
 			Mode:                 "default",
 			RawICSIncluded:       false,

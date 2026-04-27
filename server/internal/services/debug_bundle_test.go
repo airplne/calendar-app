@@ -27,6 +27,7 @@ func (f fakeDebugOperationLister) ListRecent(ctx context.Context, limit int) ([]
 }
 
 func TestDebugBundleBuildsRedactedDiagnostics(t *testing.T) {
+	t.Setenv("CALENDARAPP_USER", "private-admin-user")
 	t.Setenv("CALENDARAPP_PASS", "super-secret-password")
 	t.Setenv("TODOIST_TOKEN", "todoist-secret-token")
 	t.Setenv("OPENAI_API_KEY", "llm-secret-key")
@@ -38,6 +39,8 @@ func TestDebugBundleBuildsRedactedDiagnostics(t *testing.T) {
 		"attendee@example.com",
 		"private-event-1",
 		"testuser",
+		"private-admin-user",
+		"local-principal",
 		"default",
 		"PrivateDeviceName",
 		"SecretBuildToken",
@@ -62,7 +65,7 @@ func TestDebugBundleBuildsRedactedDiagnostics(t *testing.T) {
 	}}
 	service := NewDebugBundleService(
 		NewSyncHealthService(fakeDebugOperationLister{operations: ops}, UnknownGreenSyncProvider()),
-		DebugBundleOptions{Version: "test", Environment: "development", DataDir: "/private/data", MigrationsDir: "/private/migrations", GeneratedBy: "testuser"},
+		DebugBundleOptions{Version: "test", Environment: "development", DataDir: "/private/data", MigrationsDir: "/private/migrations"},
 	)
 
 	bundle, err := service.Build(context.Background())
@@ -93,6 +96,9 @@ func TestDebugBundleBuildsRedactedDiagnostics(t *testing.T) {
 		t.Fatalf("marshal bundle: %v", err)
 	}
 	body := string(payload)
+	if strings.Contains(body, "generated_by") {
+		t.Fatalf("debug bundle should not include generated_by: %s", body)
+	}
 	for _, fragment := range privateFragments {
 		if strings.Contains(body, fragment) {
 			t.Fatalf("debug bundle leaked private fragment %q in %s", fragment, body)

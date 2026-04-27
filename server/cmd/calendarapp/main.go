@@ -135,6 +135,17 @@ func main() {
 	syncHealthService := services.NewSyncHealthService(operationRepo, services.UnknownGreenSyncProvider())
 	r.Mount("/api/v1/sync-health", api.NewSyncHealthHandler(syncHealthService).Routes())
 
+	// Authenticated debug bundle export. This reuses MVP Basic Auth/env credentials as local admin access.
+	debugBundleService := services.NewDebugBundleService(syncHealthService, services.DebugBundleOptions{
+		Version:       getEnv("CALENDARAPP_VERSION", "unknown"),
+		Environment:   appEnv,
+		DataDir:       dataDir,
+		MigrationsDir: migrationsDir,
+		GeneratedBy:   authConfig.Username,
+	})
+	debugBundleHandler := caldav.BasicAuthMiddleware(authConfig, userRepo)(api.NewDebugBundleHandler(debugBundleService))
+	r.Handle("/api/v1/debug-bundle", debugBundleHandler)
+
 	// Well-known CalDAV auto-discovery endpoint
 	r.Get("/.well-known/caldav", caldav.NewWellKnownRoutes(authConfig.Username).ServeHTTP)
 

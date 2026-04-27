@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/airplne/calendar-app/server/internal/api"
 	"github.com/airplne/calendar-app/server/internal/caldav"
 	"github.com/airplne/calendar-app/server/internal/data"
 	"github.com/airplne/calendar-app/server/internal/domain"
+	"github.com/airplne/calendar-app/server/internal/services"
 	"github.com/airplne/calendar-app/server/internal/webui"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -85,6 +87,7 @@ func main() {
 	userRepo := data.NewSQLiteUserRepo(db)
 	calendarRepo := data.NewSQLiteCalendarRepo(db)
 	eventRepo := data.NewSQLiteEventRepo(db)
+	operationRepo := data.NewSQLiteCalDAVOperationRepo(db)
 
 	// Load auth config to get configured username
 	authConfig := caldav.LoadAuthConfig()
@@ -128,11 +131,15 @@ func main() {
 	// SSE endpoint stub
 	r.Get("/events", handleSSE)
 
+	// Sync Health API
+	syncHealthService := services.NewSyncHealthService(operationRepo, services.UnknownGreenSyncProvider())
+	r.Mount("/api/v1/sync-health", api.NewSyncHealthHandler(syncHealthService).Routes())
+
 	// Well-known CalDAV auto-discovery endpoint
 	r.Get("/.well-known/caldav", caldav.NewWellKnownRoutes(authConfig.Username).ServeHTTP)
 
 	// CalDAV mount point with repository access
-	r.Mount("/dav", caldav.NewHandlerWithRepos(db, userRepo, calendarRepo, eventRepo))
+	r.Mount("/dav", caldav.NewHandlerWithReposAndOperationRecorder(db, userRepo, calendarRepo, eventRepo, operationRepo))
 
 	// Web UI (embedded in production; placeholder when dist not built)
 	r.Mount("/", webui.Handler())

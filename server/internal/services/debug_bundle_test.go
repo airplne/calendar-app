@@ -116,3 +116,9 @@ func TestDebugBundleBuildReturnsServiceError(t *testing.T) {
 		t.Fatal("Build() error = nil, want error")
 	}
 }
+
+func TestDebugBundleSchemaVersion(t *testing.T) {
+	if DebugBundleSchemaVersion != "debug_bundle.v1" {
+		t.Fatalf("DebugBundleSchemaVersion = %q", DebugBundleSchemaVersion)
+	}
+}

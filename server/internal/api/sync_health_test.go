@@ -26,7 +26,7 @@ func (f fakeAPIOperationLister) ListRecent(ctx context.Context, limit int) ([]*d
 
 func TestSyncHealthAPIUnknownWhenNoData(t *testing.T) {
 	handler := NewSyncHealthHandler(services.NewSyncHealthService(fakeAPIOperationLister{}, services.UnknownGreenSyncProvider()))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync-health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
 	handler.Routes().ServeHTTP(rr, req)
@@ -70,7 +70,7 @@ func TestSyncHealthAPIOperationsAreRedacted(t *testing.T) {
 		RedactedError:     "ETag precondition failed.",
 	}}
 	handler := NewSyncHealthHandler(services.NewSyncHealthService(fakeAPIOperationLister{operations: ops}, services.UnknownGreenSyncProvider()))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync-health/operations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/operations", nil)
 	rr := httptest.NewRecorder()
 
 	handler.Routes().ServeHTTP(rr, req)
@@ -96,7 +96,7 @@ func TestSyncHealthAPIClients(t *testing.T) {
 		{OccurredAt: now.Add(-time.Minute), ClientFingerprint: domain.CalDAVClientAppleCalendar, Outcome: domain.CalDAVOperationSuccess},
 		{OccurredAt: now.Add(-2 * time.Minute), ClientFingerprint: domain.CalDAVClientThunderbird, Outcome: domain.CalDAVOperationSuccess},
 	}}, services.UnknownGreenSyncProvider()))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync-health/clients", nil)
+	req := httptest.NewRequest(http.MethodGet, "/clients", nil)
 	rr := httptest.NewRecorder()
 
 	handler.Routes().ServeHTTP(rr, req)
@@ -115,7 +115,7 @@ func TestSyncHealthAPIClients(t *testing.T) {
 
 func TestSyncHealthValidationEndpointsPlaceholder(t *testing.T) {
 	handler := NewSyncHealthHandler(services.NewSyncHealthService(fakeAPIOperationLister{}, services.UnknownGreenSyncProvider()))
-	for _, path := range []string{"/api/v1/sync-health/validation-event/start", "/api/v1/sync-health/validation-event/verify"} {
+	for _, path := range []string{"/validation-event/start", "/validation-event/verify"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		rr := httptest.NewRecorder()
 

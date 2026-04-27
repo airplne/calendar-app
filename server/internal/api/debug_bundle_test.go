@@ -42,6 +42,42 @@ func TestDebugBundleAPIRequiresBasicAuth(t *testing.T) {
 	}
 }
 
+func TestDebugBundleAPIRejectsWrongBasicAuthCredentials(t *testing.T) {
+	handler := authenticatedDebugBundleHandler(fakeDebugAPIOperationLister{})
+	cases := []struct {
+		name     string
+		username string
+		password string
+	}{
+		{name: "correct username wrong password", username: "admin", password: "wrong-password-value"},
+		{name: "wrong username correct password", username: "private-admin-user", password: "secret-password-value"},
+		{name: "wrong username wrong password", username: "local-principal", password: "wrong-password-value"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/debug-bundle", nil)
+			req.SetBasicAuth(tc.username, tc.password)
+			rr := httptest.NewRecorder()
+
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
+			}
+			body := rr.Body.String()
+			if strings.Contains(body, "schema_version") || strings.Contains(body, services.DebugBundleSchemaVersion) {
+				t.Fatalf("wrong credentials returned debug bundle payload: %s", body)
+			}
+			for _, fragment := range []string{tc.username, tc.password, "wrong-password-value", "secret-password-value"} {
+				if strings.Contains(body, fragment) {
+					t.Fatalf("wrong-credential response leaked credential fragment %q in %s", fragment, body)
+				}
+			}
+		})
+	}
+}
+
 func TestDebugBundleAPIReturnsRedactedBundle(t *testing.T) {
 	handler := authenticatedDebugBundleHandler(fakeDebugAPIOperationLister{operations: []*domain.CalDAVOperation{{
 		OccurredAt:        time.Now().UTC(),
@@ -57,7 +93,7 @@ func TestDebugBundleAPIReturnsRedactedBundle(t *testing.T) {
 		RedactedError:     "ETag precondition failed.",
 	}}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/debug-bundle", nil)
-	req.SetBasicAuth("admin", "secret")
+	req.SetBasicAuth("admin", "secret-password-value")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -73,16 +109,21 @@ func TestDebugBundleAPIReturnsRedactedBundle(t *testing.T) {
 	}
 
 	body := rr.Body.String()
+	if strings.Contains(body, "generated_by") {
+		t.Fatalf("debug bundle should not include generated_by: %s", body)
+	}
 	for _, fragment := range []string{
 		"BEGIN:VCALENDAR",
 		"Sensitive Doctor Appointment",
 		"Detailed private description",
 		"attendee@example.com",
 		"private-event-1",
+		"private-admin-user",
+		"local-principal",
 		"PrivateDeviceName",
 		"SecretBuildToken",
 		"Authorization",
-		"secret",
+		"secret-password-value",
 	} {
 		if strings.Contains(body, fragment) {
 			t.Fatalf("debug bundle leaked private fragment %q in %s", fragment, body)
@@ -110,7 +151,7 @@ func TestDebugBundleAPIReturnsRedactedBundle(t *testing.T) {
 func TestDebugBundleAPIReturnsSafeGenericError(t *testing.T) {
 	handler := authenticatedDebugBundleHandler(fakeDebugAPIOperationLister{err: errors.New("database failed for private-event-1 BEGIN:VCALENDAR")})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/debug-bundle", nil)
-	req.SetBasicAuth("admin", "secret")
+	req.SetBasicAuth("admin", "secret-password-value")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -131,8 +172,8 @@ func TestDebugBundleAPIReturnsSafeGenericError(t *testing.T) {
 
 func authenticatedDebugBundleHandler(lister fakeDebugAPIOperationLister) http.Handler {
 	syncService := services.NewSyncHealthService(lister, services.UnknownGreenSyncProvider())
-	debugService := services.NewDebugBundleService(syncService, services.DebugBundleOptions{Version: "test", Environment: "test", GeneratedBy: "admin"})
-	return caldav.BasicAuthMiddleware(caldav.AuthConfig{Username: "admin", Password: "secret"}, fakeDebugUserRepo{})(NewDebugBundleHandler(debugService))
+	debugService := services.NewDebugBundleService(syncService, services.DebugBundleOptions{Version: "test", Environment: "test"})
+	return caldav.BasicAuthMiddleware(caldav.AuthConfig{Username: "admin", Password: "secret-password-value"}, fakeDebugUserRepo{})(NewDebugBundleHandler(debugService))
 }
 
 type fakeDebugUserRepo struct{}

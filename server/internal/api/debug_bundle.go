@@ -28,11 +28,7 @@ func (h *DebugBundleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actor := bundle.GeneratedBy
-	if actor == "" {
-		actor = "authenticated-user"
-	}
-	slog.Info("debug_bundle.exported", "timestamp", time.Now().UTC(), "actor", actor, "redaction_mode", bundle.Redaction.Mode)
+	slog.Info("debug_bundle.exported", "timestamp", time.Now().UTC(), "actor", "authenticated-user", "redaction_mode", bundle.Redaction.Mode)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="calendar-app-debug-bundle.json"`)

@@ -141,7 +141,6 @@ func main() {
 		Environment:   appEnv,
 		DataDir:       dataDir,
 		MigrationsDir: migrationsDir,
-		GeneratedBy:   authConfig.Username,
 	})
 	debugBundleHandler := caldav.BasicAuthMiddleware(authConfig, userRepo)(api.NewDebugBundleHandler(debugBundleService))
 	r.Handle("/api/v1/debug-bundle", debugBundleHandler)
